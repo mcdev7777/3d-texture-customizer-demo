@@ -89,7 +89,6 @@ async function load3mf(arrayBuffer: ArrayBuffer): Promise<Object3D> {
   })
 
   const loader = new ThreeMFLoader()
-  // Parse ArrayBuffer directly — blob URL loadAsync can hang or fail in some Chrome builds.
   const object = loader.parse(arrayBuffer)
   ensureViewerMaterials(object, true)
   return object

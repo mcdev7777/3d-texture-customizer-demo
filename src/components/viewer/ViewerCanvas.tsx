@@ -45,7 +45,7 @@ function EmptyState() {
       </div>
       <h2 className="text-lg font-medium text-slate-200 mb-1">No model loaded</h2>
       <p className="text-sm text-slate-400 max-w-sm text-center">
-        Open or drag a 3D file (.stl, .obj, .glb, .gltf, .3mf) to preview your printable model.
+        Open a model file or drag one into the workspace.
       </p>
     </div>
   )
@@ -68,8 +68,8 @@ function WebGLUnavailable() {
       <AlertTriangle className="h-10 w-10 text-amber-400 mb-3" />
       <h2 className="text-lg font-medium text-slate-200 mb-2">3D viewer unavailable</h2>
       <p className="text-sm text-slate-400 max-w-md">
-        WebGL is disabled or unavailable in this browser. Enable hardware acceleration in Chrome
-        settings, then reload the page.
+        WebGL is not available. Check that hardware acceleration is enabled in your browser
+        settings, then reload.
       </p>
     </div>
   )
@@ -81,8 +81,7 @@ function ViewerErrorFallback() {
       <AlertTriangle className="h-10 w-10 text-red-400 mb-3" />
       <h2 className="text-lg font-medium text-slate-200 mb-2">Viewer failed to start</h2>
       <p className="text-sm text-slate-400 max-w-md">
-        The 3D canvas could not initialize. Try reloading the page or using a recent version of
-        Chrome with hardware acceleration enabled.
+        The 3D view could not be initialized. Reload the page to try again.
       </p>
     </div>
   )

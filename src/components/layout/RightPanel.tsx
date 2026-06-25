@@ -1,10 +1,4 @@
-import {
-  RotateCcw,
-  Maximize2,
-  Camera,
-  BoxSelect,
-  ScanLine,
-} from 'lucide-react'
+import { RotateCcw, Maximize2 } from 'lucide-react'
 import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
 import { ToggleRow } from '../ui/ToggleRow'
@@ -60,11 +54,11 @@ export function RightPanel() {
             />
           </div>
         ) : (
-          <p className="text-xs text-slate-500">Load a model to see file details.</p>
+          <p className="text-xs text-slate-500">No model loaded.</p>
         )}
       </Panel>
 
-      <Panel title="Viewer Controls">
+      <Panel title="Viewer">
         <div className="grid grid-cols-2 gap-2 mb-3">
           <Button
             icon={<RotateCcw className="h-3.5 w-3.5" />}
@@ -107,32 +101,6 @@ export function RightPanel() {
             onChange={(v) => setViewerSetting('showBoundingBox', v)}
             disabled={!hasModel}
           />
-        </div>
-
-        <div className="mt-3 pt-3 border-t border-purple-500/10">
-          <Button
-            icon={<Camera className="h-3.5 w-3.5" />}
-            disabled
-            className="w-full text-xs opacity-50"
-            title="Screenshot — coming in a future milestone"
-          >
-            Screenshot
-          </Button>
-        </div>
-      </Panel>
-
-      <Panel title="Next Up" compact>
-        <div className="flex items-start gap-2">
-          <BoxSelect className="h-4 w-4 text-purple-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Surface selection begins in Milestone 2.
-            </p>
-            <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
-              <ScanLine className="h-3 w-3" />
-              Pick flat faces to apply textures
-            </p>
-          </div>
         </div>
       </Panel>
     </aside>

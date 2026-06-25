@@ -104,7 +104,7 @@ body {
   animation: pulse-glow 3s ease-in-out infinite;
 }
 
-/* Chrome can fail to composite WebGL when backdrop-filter overlaps the canvas */
+/* WebGL compositing: avoid backdrop-filter over the canvas */
 .viewer-shell {
   flex: 1 1 auto;
   min-height: 280px;

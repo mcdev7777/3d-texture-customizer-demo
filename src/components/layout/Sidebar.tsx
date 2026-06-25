@@ -16,16 +16,16 @@ interface NavItem {
   label: string
   icon: LucideIcon
   active?: boolean
-  comingSoon?: boolean
+  disabled?: boolean
 }
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'load', label: 'Load Model', icon: Upload, active: true },
-  { id: 'surface', label: 'Surface Selection', icon: MousePointerClick, comingSoon: true },
-  { id: 'quick', label: 'Quick Texture', icon: Sparkles, comingSoon: true },
-  { id: 'advanced', label: 'Advanced Texture', icon: Layers, comingSoon: true },
-  { id: 'patterns', label: 'Pattern Library', icon: Grid3x3, comingSoon: true },
-  { id: 'export', label: 'Export', icon: Download, comingSoon: true },
+  { id: 'surface', label: 'Surface Selection', icon: MousePointerClick, disabled: true },
+  { id: 'quick', label: 'Quick Texture', icon: Sparkles, disabled: true },
+  { id: 'advanced', label: 'Advanced Texture', icon: Layers, disabled: true },
+  { id: 'patterns', label: 'Pattern Library', icon: Grid3x3, disabled: true },
+  { id: 'export', label: 'Export', icon: Download, disabled: true },
 ]
 
 export function Sidebar() {
@@ -46,22 +46,17 @@ export function Sidebar() {
           <button
             key={item.id}
             type="button"
-            disabled={item.comingSoon}
+            disabled={item.disabled}
             className={clsx(
               'w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all',
               item.active &&
                 'bg-purple-600/25 text-white border border-purple-500/30 shadow-[0_0_12px_rgba(124,58,237,0.15)]',
-              item.comingSoon && 'opacity-45 cursor-not-allowed text-slate-400',
-              !item.active && !item.comingSoon && 'text-slate-300 hover:bg-white/5',
+              item.disabled && 'opacity-40 cursor-not-allowed text-slate-500',
+              !item.active && !item.disabled && 'text-slate-300 hover:bg-white/5',
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" />
-            <span className="flex-1">{item.label}</span>
-            {item.comingSoon && (
-              <span className="text-[9px] uppercase tracking-wide text-purple-400/70 font-medium">
-                Soon
-              </span>
-            )}
+            <span>{item.label}</span>
           </button>
         ))}
       </nav>
