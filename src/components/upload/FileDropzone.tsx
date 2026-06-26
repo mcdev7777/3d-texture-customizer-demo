@@ -9,6 +9,7 @@ import {
   unloadCurrentModel,
 } from '../../lib/loaders/loadModel'
 import { ACCEPTED_FILE_EXTENSIONS } from '../../types/model'
+import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 
 function yieldToMain(): Promise<void> {
   return new Promise((resolve) => {
@@ -45,6 +46,7 @@ export function FileDropzone({ compact }: FileDropzoneProps) {
       await yieldToMain()
 
       try {
+        useSurfaceSelectionStore.getState().clearSelection()
         const newModel = await loadModelFromFile(file)
         unloadCurrentModel(loadedModel)
         setLoadedModel(newModel, file.name, fileType)

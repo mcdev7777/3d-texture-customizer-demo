@@ -9,6 +9,9 @@ import { FloorGrid } from './FloorGrid'
 import { ModelRenderer } from './ModelRenderer'
 import { CameraController } from './CameraController'
 import { BoundingBox } from './BoundingBox'
+import { SurfacePicker } from '../selection/SurfacePicker'
+import { SelectedSurfaceOverlay } from '../selection/SelectedSurfaceOverlay'
+import { ModelDimEffect } from '../selection/ModelDimEffect'
 
 function SceneContent() {
   const showAxes = useAppStore((s) => s.viewerSettings.showAxes)
@@ -31,6 +34,10 @@ function SceneContent() {
       <Suspense fallback={null}>
         <ModelRenderer />
       </Suspense>
+
+      <ModelDimEffect />
+      <SelectedSurfaceOverlay />
+      <SurfacePicker />
 
       <BoundingBox object={loadedModel?.object ?? null} />
     </>
