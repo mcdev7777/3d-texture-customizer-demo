@@ -8,6 +8,7 @@ export interface SurfacePick {
 }
 
 export interface SelectedSurface {
+  surfaceId: string
   meshUuid: string
   meshName: string
   faceIndex: number

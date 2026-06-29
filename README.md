@@ -77,6 +77,32 @@ Selected regions highlight in purple. Other parts of the model dim while a surfa
 | 12 | Toggle wireframe / fit / reset | Viewer controls still work |
 | 13 | Load a different model | Selection clears, new model selectable |
 
+## Patterns and texture preview
+
+1. Select a flat surface (see above)
+2. Pick a pattern from **Pattern Library** in the right panel
+3. Adjust placement in **Texture Placement**: scale, rotation, offset, depth
+4. Switch between **Emboss** and **Engrave** preview modes
+5. Select another surface — each surface keeps its own pattern settings
+6. **Reset surface pattern** clears only the active surface
+
+Built-in patterns: diagonal lines, grid, dots, waves, chevron, mark.
+
+### Pattern test checklist
+
+| Step | Action | Expected result |
+|------|--------|-----------------|
+| 1 | Select a panel, pick Grid | Pattern appears on that panel only |
+| 2 | Increase scale | Pattern tiles more densely |
+| 3 | Rotate slider | Pattern rotates on the surface |
+| 4 | Offset X/Y | Pattern shifts across the panel |
+| 5 | Depth + Emboss | Pattern looks raised |
+| 6 | Engrave mode | Pattern looks recessed/darker |
+| 7 | Select another panel, apply Dots | First panel keeps its pattern |
+| 8 | Re-select first panel | Original pattern settings restored in UI |
+| 9 | Reset surface pattern | Pattern removed from current surface only |
+| 10 | Click another surface after pattern applied | Selection still works |
+
 ## Tech stack
 
 - Vite, React, TypeScript
