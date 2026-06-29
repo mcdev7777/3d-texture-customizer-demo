@@ -5,6 +5,7 @@ import { ToggleRow } from '../ui/ToggleRow'
 import { FileDropzone } from '../upload/FileDropzone'
 import { useAppStore } from '../../store/useAppStore'
 import { formatFileTypeLabel } from '../../lib/loaders/loadModel'
+import { SurfaceSelectionPanel } from '../selection/SurfaceSelectionPanel'
 
 function StatRow({ label, value }: { label: string; value: string | number }) {
   return (
@@ -57,6 +58,8 @@ export function RightPanel() {
           <p className="text-xs text-slate-500">No model loaded.</p>
         )}
       </Panel>
+
+      <SurfaceSelectionPanel />
 
       <Panel title="Viewer">
         <div className="grid grid-cols-2 gap-2 mb-3">

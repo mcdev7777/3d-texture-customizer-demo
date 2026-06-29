@@ -10,25 +10,36 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { FileDropzone } from '../upload/FileDropzone'
+import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 
 interface NavItem {
   id: string
   label: string
   icon: LucideIcon
-  active?: boolean
   disabled?: boolean
+  onClick?: () => void
+  active?: boolean
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'load', label: 'Load Model', icon: Upload, active: true },
-  { id: 'surface', label: 'Surface Selection', icon: MousePointerClick, disabled: true },
-  { id: 'quick', label: 'Quick Texture', icon: Sparkles, disabled: true },
-  { id: 'advanced', label: 'Advanced Texture', icon: Layers, disabled: true },
-  { id: 'patterns', label: 'Pattern Library', icon: Grid3x3, disabled: true },
-  { id: 'export', label: 'Export', icon: Download, disabled: true },
-]
-
 export function Sidebar() {
+  const selectionEnabled = useSurfaceSelectionStore((s) => s.enabled)
+  const setSelectionEnabled = useSurfaceSelectionStore((s) => s.setEnabled)
+
+  const navItems: NavItem[] = [
+    { id: 'load', label: 'Load Model', icon: Upload },
+    {
+      id: 'surface',
+      label: 'Surface Selection',
+      icon: MousePointerClick,
+      active: selectionEnabled,
+      onClick: () => setSelectionEnabled(!selectionEnabled),
+    },
+    { id: 'quick', label: 'Quick Texture', icon: Sparkles, disabled: true },
+    { id: 'advanced', label: 'Advanced Texture', icon: Layers, disabled: true },
+    { id: 'patterns', label: 'Pattern Library', icon: Grid3x3, disabled: true },
+    { id: 'export', label: 'Export', icon: Download, disabled: true },
+  ]
+
   return (
     <aside className="flex flex-col w-full lg:w-56 shrink-0 panel-glass rounded-xl overflow-hidden max-h-[40vh] lg:max-h-none">
       <div className="px-4 py-4 border-b border-purple-500/15 shrink-0">
@@ -42,11 +53,12 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto min-h-0">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <button
             key={item.id}
             type="button"
             disabled={item.disabled}
+            onClick={item.onClick}
             className={clsx(
               'w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all',
               item.active &&
