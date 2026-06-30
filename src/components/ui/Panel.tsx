@@ -6,11 +6,13 @@ interface PanelProps {
   children: ReactNode
   className?: string
   compact?: boolean
+  id?: string
 }
 
-export function Panel({ title, children, className, compact }: PanelProps) {
+export function Panel({ title, children, className, compact, id }: PanelProps) {
   return (
     <div
+      id={id}
       className={clsx(
         'panel-glass rounded-xl',
         compact ? 'p-3' : 'p-4',

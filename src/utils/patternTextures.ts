@@ -134,7 +134,7 @@ const PATTERN_DRAWERS: Record<PatternId, DrawFn> = {
 const textureCache = new Map<PatternId, CanvasTexture>()
 const thumbnailCache = new Map<PatternId, string>()
 
-function drawToCanvas(patternId: PatternId, size: number): HTMLCanvasElement {
+export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
@@ -148,7 +148,7 @@ export function createPatternTexture(patternId: PatternId): Texture {
   const cached = textureCache.get(patternId)
   if (cached) return cached
 
-  const canvas = drawToCanvas(patternId, 256)
+  const canvas = getPatternCanvas(patternId, 256)
   const texture = new CanvasTexture(canvas)
   texture.wrapS = RepeatWrapping
   texture.wrapT = RepeatWrapping
@@ -174,7 +174,7 @@ export function createPatternThumbnail(patternId: PatternId): string {
   const cached = thumbnailCache.get(patternId)
   if (cached) return cached
 
-  const canvas = drawToCanvas(patternId, 64)
+  const canvas = getPatternCanvas(patternId, 64)
   const url = canvas.toDataURL('image/png')
   thumbnailCache.set(patternId, url)
   return url

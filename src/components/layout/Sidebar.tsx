@@ -37,7 +37,14 @@ export function Sidebar() {
     { id: 'quick', label: 'Quick Texture', icon: Sparkles },
     { id: 'advanced', label: 'Advanced Texture', icon: Layers, disabled: true },
     { id: 'patterns', label: 'Pattern Library', icon: Grid3x3 },
-    { id: 'export', label: 'Export', icon: Download, disabled: true },
+    {
+      id: 'export',
+      label: 'Export',
+      icon: Download,
+      onClick: () => {
+        document.getElementById('export-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      },
+    },
   ]
 
   return (

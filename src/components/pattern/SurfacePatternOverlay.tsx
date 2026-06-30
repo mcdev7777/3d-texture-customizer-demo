@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { DoubleSide, PlaneGeometry, Quaternion, Vector3, type Mesh } from 'three'
 import { usePatternStore } from '../../store/usePatternStore'
 import { clonePatternTexture } from '../../utils/patternTextures'
+import { applyPatternTextureTransform } from '../../lib/textures/patternPlacementMath'
 import { markIgnoreRaycast } from '../../lib/three/raycastUtils'
+import { useBakeStore } from '../../store/useBakeStore'
 import type { SurfacePatternPlacement } from '../../types/pattern'
 
 function PatternPlane({ placement }: { placement: SurfacePatternPlacement }) {
@@ -33,12 +35,7 @@ function PatternPlane({ placement }: { placement: SurfacePatternPlacement }) {
   )
 
   useEffect(() => {
-    const repeat = Math.max(0.25, settings.scale) * 2
-    texture.repeat.set(repeat, repeat)
-    texture.center.set(0.5, 0.5)
-    texture.rotation = (settings.rotation * Math.PI) / 180
-    texture.offset.set(settings.offsetX * 0.35, -settings.offsetY * 0.35)
-    texture.needsUpdate = true
+    applyPatternTextureTransform(texture, settings)
   }, [texture, settings.scale, settings.rotation, settings.offsetX, settings.offsetY])
 
   useEffect(() => () => texture.dispose(), [texture])
@@ -82,10 +79,17 @@ function PatternPlane({ placement }: { placement: SurfacePatternPlacement }) {
 
 export function SurfacePatternOverlay() {
   const placements = usePatternStore((s) => s.placements)
+  const bakedSurfaceIds = useBakeStore((s) => s.bakedSurfaceIds)
+  const showBakedInScene = useBakeStore((s) => s.showBakedInScene)
 
   const active = useMemo(
-    () => Object.values(placements).filter((p) => p.settings.patternId !== null),
-    [placements],
+    () =>
+      Object.values(placements).filter((p) => {
+        if (p.settings.patternId === null) return false
+        if (showBakedInScene && bakedSurfaceIds.includes(p.surfaceId)) return false
+        return true
+      }),
+    [placements, bakedSurfaceIds, showBakedInScene],
   )
 
   return (

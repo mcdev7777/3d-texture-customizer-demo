@@ -1,10 +1,34 @@
 import { useAppStore } from '../../store/useAppStore'
+import { useBakeStore } from '../../store/useBakeStore'
+
+function bakeStatusText(status: ReturnType<typeof useBakeStore.getState>['status']): string | null {
+  switch (status) {
+    case 'preview':
+      return 'Preview only'
+    case 'bake-pending':
+      return 'Bake pending'
+    case 'baking':
+      return 'Baking…'
+    case 'export-ready':
+      return 'Export ready'
+    case 'exporting':
+      return 'Exporting…'
+    case 'complete':
+      return 'Export done'
+    case 'error':
+      return 'Bake/export error'
+    default:
+      return null
+  }
+}
 
 export function BottomStatusBar() {
   const fileName = useAppStore((s) => s.fileName)
   const modelStats = useAppStore((s) => s.modelStats)
   const isLoading = useAppStore((s) => s.isLoading)
   const hasModel = useAppStore((s) => !!s.loadedModel)
+  const bakeStatus = useBakeStore((s) => s.status)
+  const bakeLabel = bakeStatusText(bakeStatus)
 
   return (
     <footer className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-2 panel-glass rounded-xl text-xs text-slate-400 shrink-0">
@@ -27,6 +51,9 @@ export function BottomStatusBar() {
             {modelStats.triangleCount.toLocaleString()} tris ·{' '}
             {modelStats.vertexCount.toLocaleString()} verts
           </span>
+        )}
+        {bakeLabel && (
+          <span className="text-purple-400/80">{bakeLabel}</span>
         )}
       </div>
 
