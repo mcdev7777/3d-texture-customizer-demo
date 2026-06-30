@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { Panel } from '../ui/Panel'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { usePatternStore } from '../../store/usePatternStore'
+import { useBakeStore } from '../../store/useBakeStore'
 import { PATTERN_DEFINITIONS, createPatternThumbnail } from '../../utils/patternTextures'
 import type { PatternId } from '../../types/pattern'
 
@@ -12,6 +13,7 @@ export function PatternLibraryPanel() {
   const currentPatternId = usePatternStore((s) =>
     selectedSurface ? s.placements[selectedSurface.surfaceId]?.settings.patternId : null,
   )
+  const setPreviewActive = useBakeStore((s) => s.setPreviewActive)
 
   const thumbnails = useMemo(() => {
     const map = new Map<PatternId, string>()
@@ -24,15 +26,17 @@ export function PatternLibraryPanel() {
   const handleSelect = (patternId: PatternId) => {
     if (!selectedSurface) return
     applyPattern(selectedSurface, patternId)
+    setPreviewActive(true)
   }
 
   return (
-    <Panel title="Pattern Library">
+    <Panel title="Texture Library" id="patterns-panel">
       {!selectedSurface ? (
-        <p className="text-xs text-slate-500 mb-3">Select a surface first.</p>
+        <p className="text-xs text-slate-500 mb-3">Select a surface or part first.</p>
       ) : (
         <p className="text-xs text-slate-400 mb-3">
-          Editing {selectedSurface.meshName || 'surface'} · face {selectedSurface.faceIndex}
+          Applying to {selectedSurface.meshName || 'surface'}
+          {selectedSurface.selectionType === 'part' ? ' (part)' : ''}
         </p>
       )}
 
@@ -43,6 +47,7 @@ export function PatternLibraryPanel() {
             type="button"
             disabled={!selectedSurface}
             onClick={() => handleSelect(def.id)}
+            title={def.label}
             className={clsx(
               'rounded-lg border p-1.5 text-left transition-all',
               'disabled:opacity-40 disabled:cursor-not-allowed',
@@ -54,9 +59,11 @@ export function PatternLibraryPanel() {
             <img
               src={thumbnails.get(def.id)}
               alt={def.label}
-              className="w-full aspect-square rounded object-cover mb-1"
+              className="w-full aspect-square rounded object-cover mb-1 bg-navy-950"
             />
-            <span className="text-[10px] text-slate-300 leading-tight block">{def.label}</span>
+            <span className="text-[10px] text-slate-300 leading-tight block truncate">
+              {def.label}
+            </span>
           </button>
         ))}
       </div>

@@ -12,7 +12,7 @@ import { BoundingBox } from './BoundingBox'
 import { SurfacePicker } from '../selection/SurfacePicker'
 import { SelectedSurfaceOverlay } from '../selection/SelectedSurfaceOverlay'
 import { ModelDimEffect } from '../selection/ModelDimEffect'
-import { SurfacePatternOverlay } from '../pattern/SurfacePatternOverlay'
+import { TexturePreviewOverlay } from '../texture/TexturePreviewOverlay'
 import { BakedPatchesOverlay } from '../bake/BakedPatchesOverlay'
 
 function SceneContent() {
@@ -39,7 +39,7 @@ function SceneContent() {
 
       <ModelDimEffect />
       <SelectedSurfaceOverlay />
-      <SurfacePatternOverlay />
+      <TexturePreviewOverlay />
       <BakedPatchesOverlay />
       <SurfacePicker />
 

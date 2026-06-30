@@ -20,10 +20,12 @@ interface BakeState {
   showBakedInScene: boolean
   segmentCount: number
   autoBakeOnExport: boolean
+  previewActive: boolean
 
   markPending: () => void
   setShowBakedInScene: (show: boolean) => void
   setSegmentCount: (count: number) => void
+  setPreviewActive: (active: boolean) => void
   clearBake: () => void
   bake: () => Promise<boolean>
   exportModel: (format: ExportFormat) => Promise<boolean>
@@ -48,6 +50,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
   showBakedInScene: true,
   segmentCount: 64,
   autoBakeOnExport: true,
+  previewActive: false,
 
   markPending: () => {
     const current = get()
@@ -67,6 +70,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
         bakedSurfaceIds: [],
         warnings: [],
         error: null,
+        previewActive: false,
       })
       scheduleDisposeObject(previous)
       return
@@ -93,6 +97,8 @@ export const useBakeStore = create<BakeState>((set, get) => ({
 
   setShowBakedInScene: (show) => set({ showBakedInScene: show }),
 
+  setPreviewActive: (active) => set({ previewActive: active }),
+
   setSegmentCount: (count) => {
     set({ segmentCount: Math.min(128, Math.max(16, Math.floor(count))) })
     get().markPending()
@@ -106,6 +112,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       bakedSurfaceIds: [],
       warnings: [],
       error: null,
+      previewActive: false,
     })
     scheduleDisposeObject(previous)
   },
@@ -145,6 +152,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
         bakedSurfaceIds: placements.map((p) => p.surfaceId),
         warnings: result.warnings,
         error: null,
+        previewActive: false,
       })
       return true
     } catch (err) {

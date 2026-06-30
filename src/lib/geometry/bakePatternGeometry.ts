@@ -15,7 +15,7 @@ import type {
 } from '../../types/bake'
 import { getPatternCanvas } from '../../utils/patternTextures'
 import { createPatternTextureForPlacement } from '../textures/createPatternTextureForPlacement'
-import { samplePatternHeight } from '../textures/patternPlacementMath'
+import { samplePatternHeight, depthLevelToWorld } from '../textures/patternPlacementMath'
 import { markIgnoreRaycast } from '../three/raycastUtils'
 import { disposeObject } from '../three/disposeObject'
 import { settingsFromPlacement } from '../../types/bake'
@@ -23,8 +23,9 @@ import { settingsFromPlacement } from '../../types/bake'
 const DEFAULT_SEGMENT_COUNT = 64
 const MAX_SEGMENT_COUNT = 128
 const MIN_SEGMENT_COUNT = 16
-const DEFAULT_MAX_DEPTH = 0.15
 const MIN_PANEL_SIZE = 0.05
+
+export type PatchRole = 'preview' | 'baked'
 
 const _position = new Vector3()
 const _quaternion = new Quaternion()
@@ -67,13 +68,9 @@ function clampSegmentCount(count?: number): number {
   return Math.min(MAX_SEGMENT_COUNT, Math.max(MIN_SEGMENT_COUNT, Math.floor(value)))
 }
 
-function clampDepth(depth: number, maxDepth: number): number {
-  return Math.min(Math.max(depth, 0), maxDepth)
-}
-
 export function generateDisplacedPanelGeometry(
   placement: PatternPlacement,
-  options: { segmentCount: number; maxDepth: number },
+  options: { segmentCount: number },
 ): { geometry: BufferGeometry; warnings: string[] } {
   const warnings: string[] = []
   const { plane } = placement
@@ -97,7 +94,7 @@ export function generateDisplacedPanelGeometry(
   }
   const imageData = ctx?.getImageData(0, 0, canvas.width, canvas.height) ?? null
 
-  const depth = clampDepth(placement.depth, options.maxDepth)
+  const depth = depthLevelToWorld(placement.depth)
   const sign = placement.mode === 'emboss' ? 1 : -1
 
   for (let i = 0; i < position.count; i++) {
@@ -114,11 +111,20 @@ export function generateDisplacedPanelGeometry(
   return { geometry, warnings }
 }
 
-function createBakedPatchMesh(
+export interface CreatePatchOptions {
+  segmentCount: number
+  includeTextures: boolean
+  role: PatchRole
+}
+
+/** Build a single displaced patch mesh for either live preview or committed (applied) geometry. */
+export function createPatchMesh(
   placement: PatternPlacement,
-  options: { segmentCount: number; maxDepth: number; includeTextures: boolean },
+  options: CreatePatchOptions,
 ): { mesh: Mesh; warnings: string[] } {
-  const { geometry, warnings } = generateDisplacedPanelGeometry(placement, options)
+  const { geometry, warnings } = generateDisplacedPanelGeometry(placement, {
+    segmentCount: options.segmentCount,
+  })
   const settings = settingsFromPlacement(placement)
 
   let material: MeshStandardMaterial
@@ -127,7 +133,7 @@ function createBakedPatchMesh(
     if (texture) {
       material = new MeshStandardMaterial({
         map: texture,
-        roughness: placement.mode === 'emboss' ? 0.35 : 0.75,
+        roughness: placement.mode === 'emboss' ? 0.4 : 0.7,
         metalness: placement.mode === 'emboss' ? 0.15 : 0.05,
         transparent: placement.opacity < 1,
         opacity: placement.opacity,
@@ -149,7 +155,8 @@ function createBakedPatchMesh(
   }
 
   const mesh = new Mesh(geometry, material)
-  mesh.name = `BakedPatch:${placement.surfaceId}`
+  const isPreview = options.role === 'preview'
+  mesh.name = `${isPreview ? 'PreviewPatch' : 'BakedPatch'}:${placement.surfaceId}`
 
   _position.set(...placement.plane.center)
   _quaternion.set(...placement.plane.quaternion)
@@ -159,9 +166,14 @@ function createBakedPatchMesh(
   const lift = placement.mode === 'emboss' ? 0.001 : -0.001
   mesh.position.addScaledVector(new Vector3(...placement.plane.normal), lift)
 
-  mesh.userData.isBakedPatch = true
-  mesh.userData.exportable = true
   mesh.userData.surfaceId = placement.surfaceId
+  if (isPreview) {
+    mesh.userData.isPreview = true
+    mesh.userData.exportable = false
+  } else {
+    mesh.userData.isBakedPatch = true
+    mesh.userData.exportable = true
+  }
   markIgnoreRaycast(mesh)
 
   return { mesh, warnings }
@@ -213,7 +225,6 @@ export async function bakePatternGeometry(
 ): Promise<GeometryBakeResult> {
   const warnings: string[] = []
   const segmentCount = clampSegmentCount(options.segmentCount)
-  const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH
   const includeTextures = options.includeTextures ?? true
 
   const activePlacements = options.placements.filter((p) => p.patternId)
@@ -230,10 +241,10 @@ export async function bakePatternGeometry(
       )
     }
 
-    const { mesh, warnings: patchWarnings } = createBakedPatchMesh(placement, {
+    const { mesh, warnings: patchWarnings } = createPatchMesh(placement, {
       segmentCount,
-      maxDepth,
       includeTextures,
+      role: 'baked',
     })
     bakedMeshes.push(mesh)
     warnings.push(...patchWarnings)

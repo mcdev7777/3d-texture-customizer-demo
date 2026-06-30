@@ -4,7 +4,14 @@ import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { usePatternStore } from '../../store/usePatternStore'
-import type { PatternMode } from '../../types/pattern'
+import { useBakeStore } from '../../store/useBakeStore'
+import {
+  DEPTH_MAX,
+  DEPTH_MIN,
+  SCALE_MAX,
+  SCALE_MIN,
+  type PatternMode,
+} from '../../types/pattern'
 
 function SliderRow({
   label,
@@ -52,6 +59,7 @@ export function PatternControlsPanel() {
   const placement = usePatternStore((s) => (surfaceId ? s.placements[surfaceId] : null))
   const updateSettings = usePatternStore((s) => s.updateSettings)
   const resetSurface = usePatternStore((s) => s.resetSurface)
+  const setPreviewActive = useBakeStore((s) => s.setPreviewActive)
 
   const settings = placement?.settings
   const hasPattern = settings?.patternId != null
@@ -59,11 +67,13 @@ export function PatternControlsPanel() {
   const setMode = (mode: PatternMode) => {
     if (!surfaceId) return
     updateSettings(surfaceId, { mode })
+    setPreviewActive(true)
   }
 
   const patch = (partial: Parameters<typeof updateSettings>[1]) => {
     if (!surfaceId) return
     updateSettings(surfaceId, partial)
+    setPreviewActive(true)
   }
 
   return (
@@ -108,8 +118,8 @@ export function PatternControlsPanel() {
           <SliderRow
             label="Scale"
             value={settings.scale}
-            min={0.25}
-            max={5}
+            min={SCALE_MIN}
+            max={SCALE_MAX}
             step={0.05}
             format={(v) => v.toFixed(2)}
             onChange={(v) => patch({ scale: v })}
@@ -144,10 +154,10 @@ export function PatternControlsPanel() {
           <SliderRow
             label="Depth"
             value={settings.depth}
-            min={0}
-            max={0.15}
-            step={0.005}
-            format={(v) => v.toFixed(3)}
+            min={DEPTH_MIN}
+            max={DEPTH_MAX}
+            step={0.05}
+            format={(v) => v.toFixed(2)}
             onChange={(v) => patch({ depth: v })}
           />
 

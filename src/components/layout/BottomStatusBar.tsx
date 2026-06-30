@@ -4,19 +4,19 @@ import { useBakeStore } from '../../store/useBakeStore'
 function bakeStatusText(status: ReturnType<typeof useBakeStore.getState>['status']): string | null {
   switch (status) {
     case 'preview':
-      return 'Preview only'
+      return 'Preview ready'
     case 'bake-pending':
-      return 'Bake pending'
+      return 'Preview ready'
     case 'baking':
-      return 'Baking…'
+      return 'Applying…'
     case 'export-ready':
-      return 'Export ready'
+      return 'Texture applied'
     case 'exporting':
       return 'Exporting…'
     case 'complete':
       return 'Export done'
     case 'error':
-      return 'Bake/export error'
+      return 'Error'
     default:
       return null
   }
