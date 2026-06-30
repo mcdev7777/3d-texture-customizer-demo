@@ -12,6 +12,7 @@ import { BoundingBox } from './BoundingBox'
 import { SurfacePicker } from '../selection/SurfacePicker'
 import { SelectedSurfaceOverlay } from '../selection/SelectedSurfaceOverlay'
 import { ModelDimEffect } from '../selection/ModelDimEffect'
+import { SurfacePatternOverlay } from '../pattern/SurfacePatternOverlay'
 
 function SceneContent() {
   const showAxes = useAppStore((s) => s.viewerSettings.showAxes)
@@ -37,6 +38,7 @@ function SceneContent() {
 
       <ModelDimEffect />
       <SelectedSurfaceOverlay />
+      <SurfacePatternOverlay />
       <SurfacePicker />
 
       <BoundingBox object={loadedModel?.object ?? null} />

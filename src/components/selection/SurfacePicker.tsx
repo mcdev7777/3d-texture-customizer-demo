@@ -6,6 +6,7 @@ import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { computeFaceNormal } from '../../lib/surface/computeFaceNormal'
 import { getTriangleCount } from '../../lib/surface/geometryKeys'
 import { clampFaceIndex, isMeshInModel } from '../../lib/surface/meshUtils'
+import { isRaycastIgnored } from '../../lib/three/raycastUtils'
 
 const _pointer = new Vector2()
 const _point = new Vector3()
@@ -16,6 +17,7 @@ function isSelectableMesh(object: unknown, modelRoot: Object3D | null): object i
   if (typeof object !== 'object' || object === null || !modelRoot) return false
   if (!('isMesh' in object) || !(object as Mesh).isMesh) return false
   const mesh = object as Mesh
+  if (isRaycastIgnored(mesh)) return false
   if (!mesh.geometry?.getAttribute('position')) return false
   return isMeshInModel(mesh, modelRoot)
 }
@@ -62,6 +64,7 @@ export function SurfacePicker() {
       _pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
 
       raycaster.current.setFromCamera(_pointer, camera)
+      // Raycast only the loaded model subtree — overlays live on the scene root, not here.
       const hits = raycaster.current.intersectObject(loadedModel.object, true)
 
       const hit = hits.find((h) => isSelectableMesh(h.object, loadedModel.object))

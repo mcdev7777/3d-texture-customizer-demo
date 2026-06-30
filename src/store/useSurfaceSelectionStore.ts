@@ -8,6 +8,7 @@ import { computeSurfaceArea } from '../lib/surface/computeTriangleArea'
 import { getConnectedCoplanarSurface } from '../lib/surface/getConnectedCoplanarSurface'
 import { buildSelectedSurfaceGeometry } from '../lib/surface/buildSelectedSurfaceGeometry'
 import { getTriangleCount } from '../lib/surface/geometryKeys'
+import { getSurfaceId } from '../lib/surface/getSurfaceId'
 import { clampFaceIndex, isMeshInModel } from '../lib/surface/meshUtils'
 
 interface LastPick {
@@ -73,6 +74,7 @@ function buildSelection(
   const area = computeSurfaceArea(geometry, mesh, triangleIndices)
 
   return {
+    surfaceId: getSurfaceId(mesh.uuid, clampedFace),
     meshUuid: mesh.uuid,
     meshName: mesh.name || 'Mesh',
     faceIndex: clampedFace,
