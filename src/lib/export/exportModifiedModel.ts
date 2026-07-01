@@ -1,0 +1,109 @@
+import { STLExporter } from 'three/addons/exporters/STLExporter.js'
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js'
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
+import type { Mesh, Object3D } from 'three'
+import type { ExportFormat } from '../../types/bake'
+import { downloadBlob } from './downloadBlob'
+import { disposeExportCloneGeometries } from '../three/scheduleDispose'
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[^\w.-]+/g, '_').replace(/_+/g, '_') || 'model'
+}
+
+function defaultFileName(baseName: string, format: ExportFormat): string {
+  const safe = sanitizeFileName(baseName)
+  return `${safe}-modified.${format}`
+}
+
+function prepareExportRoot(object: Object3D): Object3D {
+  const clone = object.clone(true)
+  clone.traverse((child) => {
+    if (!('isMesh' in child) || !child.isMesh) return
+    const mesh = child as Mesh
+    if (mesh.userData.isPreview || mesh.userData.isHelper) {
+      mesh.visible = false
+    }
+    if (mesh.geometry) {
+      mesh.geometry = mesh.geometry.clone()
+    }
+  })
+  return clone
+}
+
+async function exportGlb(object: Object3D): Promise<ArrayBuffer> {
+  const exporter = new GLTFExporter()
+  return new Promise((resolve, reject) => {
+    exporter.parse(
+      object,
+      (result) => {
+        if (result instanceof ArrayBuffer) {
+          resolve(result)
+          return
+        }
+        reject(new Error('GLTFExporter returned unexpected format.'))
+      },
+      (error) => reject(error instanceof Error ? error : new Error(String(error))),
+      { binary: true },
+    )
+  })
+}
+
+function exportStl(object: Object3D): ArrayBuffer {
+  const exporter = new STLExporter()
+  const output = exporter.parse(object, { binary: true })
+  if (typeof output === 'string') {
+    return new TextEncoder().encode(output).buffer as ArrayBuffer
+  }
+  if (output instanceof ArrayBuffer) {
+    return output
+  }
+  if (ArrayBuffer.isView(output)) {
+    return output.buffer.slice(
+      output.byteOffset,
+      output.byteOffset + output.byteLength,
+    ) as ArrayBuffer
+  }
+  throw new Error('STLExporter returned unexpected binary format.')
+}
+
+function exportObj(object: Object3D): string {
+  const exporter = new OBJExporter()
+  return exporter.parse(object)
+}
+
+export async function exportModifiedModel(params: {
+  object: Object3D
+  format: ExportFormat
+  fileName?: string
+}): Promise<void> {
+  const { object, format } = params
+  const baseName = params.fileName ?? 'crate3d-model'
+  const exportRoot = prepareExportRoot(object)
+
+  try {
+    switch (format) {
+      case 'glb': {
+        const buffer = await exportGlb(exportRoot)
+        downloadBlob(buffer, defaultFileName(baseName, 'glb'), 'model/gltf-binary')
+        break
+      }
+      case 'stl': {
+        const buffer = exportStl(exportRoot)
+        downloadBlob(buffer, defaultFileName(baseName, 'stl'), 'application/octet-stream')
+        break
+      }
+      case 'obj': {
+        const text = exportObj(exportRoot)
+        downloadBlob(text, defaultFileName(baseName, 'obj'), 'text/plain')
+        break
+      }
+      default: {
+        const _exhaustive: never = format
+        throw new Error(`Unsupported export format: ${_exhaustive}`)
+      }
+    }
+  } finally {
+    // Dispose cloned geometries only — materials/textures are shared with the live baked object.
+    disposeExportCloneGeometries(exportRoot)
+  }
+}

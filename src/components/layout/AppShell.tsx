@@ -6,6 +6,7 @@ import { ViewerCanvas } from '../viewer/ViewerCanvas'
 import { useAppStore } from '../../store/useAppStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { usePatternStore } from '../../store/usePatternStore'
+import { useBakeStore } from '../../store/useBakeStore'
 import { unloadCurrentModel } from '../../lib/loaders/loadModel'
 
 export function AppShell() {
@@ -17,6 +18,7 @@ export function AppShell() {
       unloadCurrentModel(useAppStore.getState().loadedModel)
       useSurfaceSelectionStore.getState().reset()
       usePatternStore.getState().clearAll()
+      useBakeStore.getState().clearBake()
     }
   }, [])
 
@@ -25,7 +27,17 @@ export function AppShell() {
     store.setModelRoot(loadedModel?.object ?? null)
     store.clearSelection()
     usePatternStore.getState().clearAll()
+    useBakeStore.getState().clearBake()
   }, [loadedModel?.object.uuid])
+
+  useEffect(() => {
+    let prevPlacements = usePatternStore.getState().placements
+    return usePatternStore.subscribe((state) => {
+      if (state.placements === prevPlacements) return
+      prevPlacements = state.placements
+      useBakeStore.getState().markPending()
+    })
+  }, [])
 
   useEffect(() => {
     if (selectedSurface) {
