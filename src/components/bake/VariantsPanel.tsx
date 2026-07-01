@@ -73,6 +73,8 @@ export function VariantsPanel() {
   const markPending = useBakeStore((s) => s.markPending)
   const clearBake = useBakeStore((s) => s.clearBake)
 
+  const hasPattern = Object.values(placements).some((p) => p.settings.patternId)
+
   const [variants, setVariants] = useState<SavedVariant[]>(() => listVariants())
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
@@ -195,7 +197,7 @@ export function VariantsPanel() {
   }
 
   return (
-    <Panel title="Variants">
+    <Panel title="Variations" id="variants-panel">
       <p className="text-[10px] text-slate-500 mb-3">
         Saved in this browser for demo purposes.
       </p>
@@ -204,7 +206,7 @@ export function VariantsPanel() {
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder="Variant name"
+            placeholder="Variation name"
             value={newName}
             disabled={!hasModel}
             onChange={(e) => setNewName(e.target.value)}
@@ -212,7 +214,7 @@ export function VariantsPanel() {
           />
           <Button
             icon={<Save className="h-3.5 w-3.5" />}
-            disabled={!hasModel}
+            disabled={!hasModel || !hasPattern}
             onClick={handleSaveNew}
             className="text-xs px-2 shrink-0"
           >
@@ -223,7 +225,7 @@ export function VariantsPanel() {
         <div className="grid grid-cols-2 gap-2">
           <Button
             icon={<Save className="h-3.5 w-3.5" />}
-            disabled={!activeVariantId || !hasModel}
+            disabled={!activeVariantId || !hasModel || !hasPattern}
             onClick={handleUpdate}
             className="text-xs px-2 py-1.5"
           >
@@ -236,7 +238,7 @@ export function VariantsPanel() {
             className="text-xs px-2 py-1.5"
             variant="ghost"
           >
-            Reset
+            Reset to original
           </Button>
         </div>
 

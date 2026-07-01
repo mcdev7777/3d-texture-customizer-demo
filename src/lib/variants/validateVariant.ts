@@ -58,7 +58,7 @@ export function sanitizePatternPlacement(raw: unknown): PatternPlacement | null 
     rotation: p.rotation,
     offsetX: p.offsetX,
     offsetY: p.offsetY,
-    depth: Math.min(Math.max(p.depth, 0), 0.15),
+    depth: Math.min(Math.max(p.depth, 0.1), 3),
     opacity: Math.min(Math.max(p.opacity, 0), 1),
     plane: {
       center: plane.center,

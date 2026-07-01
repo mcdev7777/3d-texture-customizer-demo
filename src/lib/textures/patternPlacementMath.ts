@@ -3,8 +3,18 @@ import type { SurfacePatternSettings } from '../../types/pattern'
 
 export const PATTERN_OFFSET_SCALE = 0.35
 
+/** World displacement (in normalized model units) for one unit of depth level. */
+export const DEPTH_WORLD_PER_LEVEL = 0.04
+export const MAX_DEPTH_LEVEL = 3
+
 export function getPatternRepeat(scale: number): number {
   return Math.max(0.25, scale) * 2
+}
+
+/** Convert a depth slider level (0.1–3.0) into a safe world-space displacement. */
+export function depthLevelToWorld(level: number): number {
+  const clamped = Math.min(MAX_DEPTH_LEVEL, Math.max(0, level))
+  return clamped * DEPTH_WORLD_PER_LEVEL
 }
 
 /** Apply the same transform used by preview overlays to a Three.js texture. */

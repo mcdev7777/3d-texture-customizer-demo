@@ -1,11 +1,16 @@
 import { create } from 'zustand'
 import type { Mesh, Object3D } from 'three'
 import { Vector3 } from 'three'
-import type { SelectedSurface, SurfacePick } from '../types/surfaceSelection'
-import { DEFAULT_ANGLE_TOLERANCE } from '../types/surfaceSelection'
+import type { SelectedSurface, SelectionMode, SurfacePick } from '../types/surfaceSelection'
+import {
+  DEFAULT_ANGLE_TOLERANCE,
+  MAX_ANGLE_TOLERANCE,
+  MIN_ANGLE_TOLERANCE,
+} from '../types/surfaceSelection'
 import { computeFaceNormal } from '../lib/surface/computeFaceNormal'
 import { computeSurfaceArea } from '../lib/surface/computeTriangleArea'
 import { getConnectedCoplanarSurface } from '../lib/surface/getConnectedCoplanarSurface'
+import { getAllMeshFaces, getFacesByAngle } from '../lib/surface/selectByAngle'
 import { buildSelectedSurfaceGeometry } from '../lib/surface/buildSelectedSurfaceGeometry'
 import { getTriangleCount } from '../lib/surface/geometryKeys'
 import { getSurfaceId } from '../lib/surface/getSurfaceId'
@@ -20,12 +25,16 @@ interface LastPick {
 interface SurfaceSelectionState {
   enabled: boolean
   angleTolerance: number
+  selectionMode: SelectionMode
+  connectedOnly: boolean
   selectedSurface: SelectedSurface | null
   lastPick: LastPick | null
   modelRoot: Object3D | null
 
   setEnabled: (enabled: boolean) => void
   setAngleTolerance: (degrees: number) => void
+  setSelectionMode: (mode: SelectionMode) => void
+  setConnectedOnly: (connectedOnly: boolean) => void
   setModelRoot: (root: Object3D | null) => void
   selectFromPick: (pick: SurfacePick) => void
   recomputeFromLastPick: () => void
@@ -37,12 +46,19 @@ function disposeHighlight(surface: SelectedSurface | null): void {
   surface?.highlightGeometry.dispose()
 }
 
+interface BuildOptions {
+  angleTolerance: number
+  selectionMode: SelectionMode
+  connectedOnly: boolean
+}
+
 function buildSelection(
   pick: SurfacePick,
-  angleTolerance: number,
+  options: BuildOptions,
   modelRoot: Object3D | null,
 ): SelectedSurface | null {
   const { mesh, faceIndex, point, normal } = pick
+  const { angleTolerance, selectionMode, connectedOnly } = options
 
   if (!isMeshInModel(mesh, modelRoot)) return null
 
@@ -52,12 +68,14 @@ function buildSelection(
   const triangleCount = getTriangleCount(geometry)
   const clampedFace = clampFaceIndex(faceIndex, triangleCount)
 
-  const triangleIndices = getConnectedCoplanarSurface(
-    geometry,
-    mesh,
-    clampedFace,
-    angleTolerance,
-  )
+  let triangleIndices: number[]
+  if (selectionMode === 'part') {
+    triangleIndices = getAllMeshFaces(geometry)
+  } else if (connectedOnly) {
+    triangleIndices = getConnectedCoplanarSurface(geometry, mesh, clampedFace, angleTolerance)
+  } else {
+    triangleIndices = getFacesByAngle(geometry, mesh, clampedFace, angleTolerance)
+  }
 
   const highlightGeometry = buildSelectedSurfaceGeometry(
     geometry,
@@ -72,12 +90,17 @@ function buildSelection(
   }
 
   const area = computeSurfaceArea(geometry, mesh, triangleIndices)
+  const surfaceId =
+    selectionMode === 'part'
+      ? getSurfaceId(mesh.uuid, -1)
+      : getSurfaceId(mesh.uuid, clampedFace)
 
   return {
-    surfaceId: getSurfaceId(mesh.uuid, clampedFace),
+    surfaceId,
     meshUuid: mesh.uuid,
     meshName: mesh.name || 'Mesh',
     faceIndex: clampedFace,
+    selectionType: selectionMode,
     point: point.clone(),
     normal: normal.clone(),
     triangleIndices,
@@ -90,6 +113,8 @@ function buildSelection(
 export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get) => ({
   enabled: false,
   angleTolerance: DEFAULT_ANGLE_TOLERANCE,
+  selectionMode: 'surface',
+  connectedOnly: true,
   selectedSurface: null,
   lastPick: null,
   modelRoot: null,
@@ -97,18 +122,32 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
   setEnabled: (enabled) => set({ enabled }),
 
   setAngleTolerance: (degrees) => {
-    const clamped = Math.min(45, Math.max(1, degrees))
+    const clamped = Math.min(MAX_ANGLE_TOLERANCE, Math.max(MIN_ANGLE_TOLERANCE, degrees))
     set({ angleTolerance: clamped })
+    get().recomputeFromLastPick()
+  },
+
+  setSelectionMode: (mode) => {
+    set({ selectionMode: mode })
+    get().recomputeFromLastPick()
+  },
+
+  setConnectedOnly: (connectedOnly) => {
+    set({ connectedOnly })
     get().recomputeFromLastPick()
   },
 
   setModelRoot: (root) => set({ modelRoot: root }),
 
   selectFromPick: (pick) => {
-    const { angleTolerance, selectedSurface, modelRoot } = get()
+    const { angleTolerance, selectionMode, connectedOnly, selectedSurface, modelRoot } = get()
     disposeHighlight(selectedSurface)
 
-    const surface = buildSelection(pick, angleTolerance, modelRoot)
+    const surface = buildSelection(
+      pick,
+      { angleTolerance, selectionMode, connectedOnly },
+      modelRoot,
+    )
     if (!surface) {
       set({ selectedSurface: null, lastPick: null })
       return
@@ -125,7 +164,8 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
   },
 
   recomputeFromLastPick: () => {
-    const { lastPick, angleTolerance, selectedSurface, modelRoot } = get()
+    const { lastPick, angleTolerance, selectionMode, connectedOnly, selectedSurface, modelRoot } =
+      get()
     if (!lastPick || !isMeshInModel(lastPick.mesh, modelRoot)) {
       disposeHighlight(selectedSurface)
       set({ selectedSurface: null, lastPick: null })
@@ -147,7 +187,7 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
         point: lastPick.point,
         normal,
       },
-      angleTolerance,
+      { angleTolerance, selectionMode, connectedOnly },
       modelRoot,
     )
 
@@ -166,6 +206,8 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
     set({
       enabled: false,
       angleTolerance: DEFAULT_ANGLE_TOLERANCE,
+      selectionMode: 'surface',
+      connectedOnly: true,
       selectedSurface: null,
       lastPick: null,
       modelRoot: null,

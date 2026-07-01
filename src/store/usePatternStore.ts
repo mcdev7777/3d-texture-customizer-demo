@@ -8,7 +8,7 @@ import type {
 import { DEFAULT_PATTERN_SETTINGS } from '../types/pattern'
 import { computeSurfacePlaneFromHighlight } from '../lib/surface/computeSurfacePlane'
 import { getSurfaceId, getSurfaceLabel } from '../lib/surface/getSurfaceId'
-import { disposePatternTextures } from '../utils/patternTextures'
+import { disposePatternTextures, getPatternDefinition } from '../utils/patternTextures'
 
 interface PatternState {
   placements: Record<string, SurfacePatternPlacement>
@@ -51,10 +51,15 @@ export const usePatternStore = create<PatternState>((set, get) => ({
 
     const base = buildPlacement(surface)
     const existing = get().placements[base.surfaceId]
-    const settings: SurfacePatternSettings = {
-      ...(existing?.settings ?? DEFAULT_PATTERN_SETTINGS),
-      patternId,
-    }
+    const definition = getPatternDefinition(patternId)
+    const settings: SurfacePatternSettings = existing?.settings
+      ? { ...existing.settings, patternId }
+      : {
+          ...DEFAULT_PATTERN_SETTINGS,
+          patternId,
+          scale: definition.defaultScale,
+          depth: definition.defaultDepth,
+        }
 
     set({
       placements: {

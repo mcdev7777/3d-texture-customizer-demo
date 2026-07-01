@@ -1,50 +1,33 @@
-import clsx from 'clsx'
 import {
   Upload,
   MousePointerClick,
-  Sparkles,
-  Layers,
   Grid3x3,
-  Download,
+  Layers,
+  Save,
   Box,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { FileDropzone } from '../upload/FileDropzone'
-import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 
 interface NavItem {
   id: string
   label: string
   icon: LucideIcon
-  disabled?: boolean
-  onClick?: () => void
-  active?: boolean
+  target?: string
+}
+
+function scrollToPanel(id?: string) {
+  if (!id) return
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 export function Sidebar() {
-  const selectionEnabled = useSurfaceSelectionStore((s) => s.enabled)
-  const setSelectionEnabled = useSurfaceSelectionStore((s) => s.setEnabled)
-
   const navItems: NavItem[] = [
-    { id: 'load', label: 'Load Model', icon: Upload },
-    {
-      id: 'surface',
-      label: 'Surface Selection',
-      icon: MousePointerClick,
-      active: selectionEnabled,
-      onClick: () => setSelectionEnabled(!selectionEnabled),
-    },
-    { id: 'quick', label: 'Quick Texture', icon: Sparkles },
-    { id: 'advanced', label: 'Advanced Texture', icon: Layers, disabled: true },
-    { id: 'patterns', label: 'Pattern Library', icon: Grid3x3 },
-    {
-      id: 'export',
-      label: 'Export',
-      icon: Download,
-      onClick: () => {
-        document.getElementById('export-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      },
-    },
+    { id: 'load', label: 'Load Model', icon: Upload, target: 'load-panel' },
+    { id: 'select', label: 'Select', icon: MousePointerClick, target: 'selection-panel' },
+    { id: 'library', label: 'Texture Library', icon: Grid3x3, target: 'patterns-panel' },
+    { id: 'apply', label: 'Apply Texture', icon: Layers, target: 'texture-panel' },
+    { id: 'variations', label: 'Variations', icon: Save, target: 'variants-panel' },
   ]
 
   return (
@@ -64,15 +47,8 @@ export function Sidebar() {
           <button
             key={item.id}
             type="button"
-            disabled={item.disabled}
-            onClick={item.onClick}
-            className={clsx(
-              'w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all',
-              item.active &&
-                'bg-purple-600/25 text-white border border-purple-500/30 shadow-[0_0_12px_rgba(124,58,237,0.15)]',
-              item.disabled && 'opacity-40 cursor-not-allowed text-slate-500',
-              !item.active && !item.disabled && 'text-slate-300 hover:bg-white/5',
-            )}
+            onClick={() => scrollToPanel(item.target)}
+            className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 transition-all"
           >
             <item.icon className="h-4 w-4 shrink-0" />
             <span>{item.label}</span>
@@ -80,7 +56,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="p-3 border-t border-purple-500/15 shrink-0 hidden lg:block">
+      <div id="load-panel" className="p-3 border-t border-purple-500/15 shrink-0 hidden lg:block">
         <FileDropzone />
       </div>
     </aside>
