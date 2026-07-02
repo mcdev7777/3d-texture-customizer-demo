@@ -1,10 +1,4 @@
-import {
-  CanvasTexture,
-  RepeatWrapping,
-  SRGBColorSpace,
-  type Texture,
-} from 'three'
-import type { PatternCategory, PatternId } from '../types/pattern'
+import type { BuiltinPatternId, PatternCategory, PatternId } from '../types/pattern'
 
 export interface PatternDefinition {
   id: PatternId
@@ -35,6 +29,15 @@ const BG = '#0c0c12'
 
 type DrawFn = (ctx: CanvasRenderingContext2D, size: number) => void
 
+/** Default metadata for an uploaded custom texture (no built-in entry exists). */
+const CUSTOM_PATTERN_DEFINITION: Omit<PatternDefinition, 'id'> = {
+  label: 'Custom',
+  category: 'custom',
+  defaultScale: 1,
+  defaultDepth: 1.4,
+  tileable: true,
+}
+
 function fill(ctx: CanvasRenderingContext2D, size: number): void {
   ctx.fillStyle = BG
   ctx.fillRect(0, 0, size, size)
@@ -56,10 +59,10 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
   ctx.closePath()
 }
 
-const PATTERN_DRAWERS: Record<PatternId, DrawFn> = {
+const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
   hex(ctx, size) {
     fill(ctx, size)
-    ctx.lineWidth = size * 0.018
+    ctx.lineWidth = size * 0.03
     const r = size / 6
     const w = r * Math.sqrt(3)
     const h = r * 1.5
@@ -93,7 +96,7 @@ const PATTERN_DRAWERS: Record<PatternId, DrawFn> = {
 
   diamond(ctx, size) {
     fill(ctx, size)
-    ctx.lineWidth = size * 0.02
+    ctx.lineWidth = size * 0.032
     const step = size / 5
     ctx.save()
     ctx.translate(size / 2, size / 2)
@@ -131,7 +134,7 @@ const PATTERN_DRAWERS: Record<PatternId, DrawFn> = {
 
   scales(ctx, size) {
     fill(ctx, size)
-    ctx.lineWidth = size * 0.02
+    ctx.lineWidth = size * 0.032
     const cols = 6
     const step = size / cols
     const r = step * 0.62
@@ -231,7 +234,7 @@ const PATTERN_DRAWERS: Record<PatternId, DrawFn> = {
 
   crosshatch(ctx, size) {
     fill(ctx, size)
-    ctx.lineWidth = size * 0.016
+    ctx.lineWidth = size * 0.028
     const step = size / 7
     for (let i = -size; i < size * 2; i += step) {
       ctx.beginPath()
@@ -274,48 +277,84 @@ const PATTERN_DRAWERS: Record<PatternId, DrawFn> = {
   },
 }
 
-const textureCache = new Map<PatternId, CanvasTexture>()
 const thumbnailCache = new Map<PatternId, string>()
 
-export function getPatternDefinition(patternId: PatternId): PatternDefinition {
-  return PATTERN_DEFINITIONS.find((d) => d.id === patternId) ?? PATTERN_DEFINITIONS[0]
+/**
+ * Registry of custom uploaded textures as opaque grayscale height-mask canvases
+ * (white = raised). Keyed by custom pattern id. The pattern system reads these
+ * the same way it reads built-in canvases, so custom textures drive geometry
+ * height only — never material color.
+ */
+const customCanvasRegistry = new Map<string, HTMLCanvasElement>()
+
+function isBuiltinPattern(patternId: PatternId): patternId is BuiltinPatternId {
+  return patternId in PATTERN_DRAWERS
 }
 
-export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasElement {
+export function isCustomPattern(patternId: PatternId): boolean {
+  return customCanvasRegistry.has(patternId)
+}
+
+export function registerCustomPatternCanvas(id: string, canvas: HTMLCanvasElement): void {
+  customCanvasRegistry.set(id, canvas)
+}
+
+export function unregisterCustomPatternCanvas(id: string): void {
+  customCanvasRegistry.delete(id)
+}
+
+/**
+ * Convert an uploaded image into an opaque grayscale height-mask canvas.
+ * Luminance drives height; transparent pixels become flat (black). An optional
+ * invert flips high/low so users can use either black-on-white or white-on-black art.
+ */
+export function imageToHeightMaskCanvas(
+  image: HTMLImageElement,
+  options: { size?: number; invert?: boolean } = {},
+): HTMLCanvasElement {
+  const size = options.size ?? 256
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D unavailable')
-  const drawer = PATTERN_DRAWERS[patternId] ?? PATTERN_DRAWERS.grid
-  drawer(ctx, size)
+
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, size, size)
+  ctx.drawImage(image, 0, 0, size, size)
+
+  const imageData = ctx.getImageData(0, 0, size, size)
+  const data = imageData.data
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3] / 255
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+    let value = lum * a
+    if (options.invert) value = 255 - value
+    data[i] = data[i + 1] = data[i + 2] = value
+    data[i + 3] = 255
+  }
+  ctx.putImageData(imageData, 0, 0)
   return canvas
 }
 
-export function createPatternTexture(patternId: PatternId): Texture {
-  const cached = textureCache.get(patternId)
-  if (cached) return cached
-
-  const canvas = getPatternCanvas(patternId, 256)
-  const texture = new CanvasTexture(canvas)
-  texture.wrapS = RepeatWrapping
-  texture.wrapT = RepeatWrapping
-  texture.colorSpace = SRGBColorSpace
-  texture.anisotropy = 4
-  texture.needsUpdate = true
-
-  textureCache.set(patternId, texture)
-  return texture
+export function getPatternDefinition(patternId: PatternId): PatternDefinition {
+  const builtin = PATTERN_DEFINITIONS.find((d) => d.id === patternId)
+  if (builtin) return builtin
+  return { id: patternId, ...CUSTOM_PATTERN_DEFINITION }
 }
 
-/** Independent texture instance for an overlay (do not mutate the shared cache). */
-export function clonePatternTexture(patternId: PatternId): Texture {
-  const clone = createPatternTexture(patternId).clone()
-  clone.wrapS = RepeatWrapping
-  clone.wrapT = RepeatWrapping
-  clone.colorSpace = SRGBColorSpace
-  clone.needsUpdate = true
-  return clone
+export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasElement {
+  const custom = customCanvasRegistry.get(patternId)
+  if (custom) return custom
+
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D unavailable')
+  const drawer = isBuiltinPattern(patternId) ? PATTERN_DRAWERS[patternId] : PATTERN_DRAWERS.grid
+  drawer(ctx, size)
+  return canvas
 }
 
 export function createPatternThumbnail(patternId: PatternId): string {
@@ -329,9 +368,5 @@ export function createPatternThumbnail(patternId: PatternId): string {
 }
 
 export function disposePatternTextures(): void {
-  for (const texture of textureCache.values()) {
-    texture.dispose()
-  }
-  textureCache.clear()
   thumbnailCache.clear()
 }

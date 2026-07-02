@@ -1,8 +1,8 @@
 # Spoolara Texture Studio
 
 Add real, printable surface textures to 3D models. Load a model, select a surface or
-part, pick a texture, dial in the look, and apply it as actual displaced mesh geometry —
-then save the result as a variation.
+part, pick a built-in or custom texture, dial in the look, apply it as actual displaced
+mesh geometry, and export the updated model.
 
 ## Setup
 
@@ -48,18 +48,19 @@ Models are centered and scaled to fit the workspace on load. A sample model is i
      similar-facing faces (use **Connected only** to stay within one connected panel).
    - *Part* mode selects an entire mesh.
 3. **Choose a texture** from the library (Hex, Grid, Diamond, Honeycomb, Scales, Ribbed,
-   Dots, Waves, Zigzag, Brick, Crosshatch, Cracks).
+   Dots, Waves, Zigzag, Brick, Crosshatch, Cracks), or **Load Texture** to upload your own
+   PNG/JPG/WebP. Uploaded images are used as a height mask (light raises, dark stays flat)
+   and never replace the surface color.
 4. **Adjust** scale, depth, rotation, and offset. Switch between **Emboss** (raised) and
    **Engrave** (recessed).
-5. **Preview** shows the effect as real displaced geometry on the selected area.
+5. **Preview** shows the effect as real displaced geometry on the selected area. Whole-part
+   selections texture each major face orientation correctly.
 6. **Apply texture** commits the pattern as actual mesh geometry — emboss raises the
-   surface outward, engrave recesses it inward. Normals are recomputed.
-7. **Save** the result as a variation. Variations are stored locally in the browser and
-   can be loaded, renamed, duplicated, or deleted. **Reset to original** clears applied
-   geometry and textures.
-
-Applied geometry can also be exported (GLB / STL / OBJ). GLB includes geometry and
-material/texture; STL and OBJ export geometry only.
+   surface outward, engrave recesses it. The surface keeps its original color and normals
+   are recomputed. **Reset to original** clears applied geometry and textures.
+7. **Export Model** downloads the textured model as STL, OBJ, or GLB. Only applied geometry
+   is included — preview and selection helpers are never exported. GLB includes geometry and
+   material; STL and OBJ export geometry only.
 
 ## Viewer controls
 

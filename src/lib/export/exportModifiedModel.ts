@@ -12,7 +12,7 @@ function sanitizeFileName(name: string): string {
 
 function defaultFileName(baseName: string, format: ExportFormat): string {
   const safe = sanitizeFileName(baseName)
-  return `${safe}-modified.${format}`
+  return `${safe}.${format}`
 }
 
 function prepareExportRoot(object: Object3D): Object3D {

@@ -1,34 +1,27 @@
 import { useAppStore } from '../../store/useAppStore'
 import { useBakeStore } from '../../store/useBakeStore'
 
-function bakeStatusText(status: ReturnType<typeof useBakeStore.getState>['status']): string | null {
-  switch (status) {
-    case 'preview':
-      return 'Preview ready'
-    case 'bake-pending':
-      return 'Preview ready'
-    case 'baking':
-      return 'Applying…'
-    case 'export-ready':
-      return 'Texture applied'
-    case 'exporting':
-      return 'Exporting…'
-    case 'complete':
-      return 'Export done'
-    case 'error':
-      return 'Error'
-    default:
-      return null
-  }
-}
-
 export function BottomStatusBar() {
   const fileName = useAppStore((s) => s.fileName)
   const modelStats = useAppStore((s) => s.modelStats)
   const isLoading = useAppStore((s) => s.isLoading)
   const hasModel = useAppStore((s) => !!s.loadedModel)
   const bakeStatus = useBakeStore((s) => s.status)
-  const bakeLabel = bakeStatusText(bakeStatus)
+  const appliedCount = useBakeStore((s) => s.committedSurfaceIds.length)
+  const previewActive = useBakeStore((s) => s.previewActive)
+
+  const bakeLabel =
+    bakeStatus === 'applying'
+      ? 'Applying…'
+      : bakeStatus === 'exporting'
+        ? 'Exporting…'
+        : bakeStatus === 'error'
+          ? 'Error'
+          : appliedCount > 0
+            ? `${appliedCount} textured`
+            : previewActive
+              ? 'Preview'
+              : null
 
   return (
     <footer className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-2 panel-glass rounded-xl text-xs text-slate-400 shrink-0">

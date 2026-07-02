@@ -1,11 +1,17 @@
-import type { Texture } from 'three'
-import type { SurfacePatternSettings } from '../../types/pattern'
+import type { PatternMode, SurfacePatternSettings } from '../../types/pattern'
 
 export const PATTERN_OFFSET_SCALE = 0.35
 
-/** World displacement (in normalized model units) for one unit of depth level. */
-export const DEPTH_WORLD_PER_LEVEL = 0.04
+/**
+ * World displacement (in normalized model units) for one unit of depth level.
+ * Models are normalized to roughly a few units across, so this makes the default
+ * depth (level 1.0) produce clearly readable relief without deforming the model.
+ */
+export const DEPTH_WORLD_PER_LEVEL = 0.11
 export const MAX_DEPTH_LEVEL = 3
+
+/** Contrast applied to raw mask luminance so relief edges read crisply. */
+const MASK_CONTRAST = 1.9
 
 export function getPatternRepeat(scale: number): number {
   return Math.max(0.25, scale) * 2
@@ -17,20 +23,37 @@ export function depthLevelToWorld(level: number): number {
   return clamped * DEPTH_WORLD_PER_LEVEL
 }
 
-/** Apply the same transform used by preview overlays to a Three.js texture. */
-export function applyPatternTextureTransform(
-  texture: Texture,
-  settings: Pick<SurfacePatternSettings, 'scale' | 'rotation' | 'offsetX' | 'offsetY'>,
-): void {
-  const repeat = getPatternRepeat(settings.scale)
-  texture.repeat.set(repeat, repeat)
-  texture.center.set(0.5, 0.5)
-  texture.rotation = (settings.rotation * Math.PI) / 180
-  texture.offset.set(
-    settings.offsetX * PATTERN_OFFSET_SCALE,
-    -settings.offsetY * PATTERN_OFFSET_SCALE,
-  )
-  texture.needsUpdate = true
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value
+}
+
+/** Clamp a raw mask sample into the normalized 0–1 height range. */
+export function normalizeHeightMask(value: number): number {
+  return clamp01(value)
+}
+
+/** Push mid-grays toward 0/1 so pattern edges are sharp instead of washed out. */
+export function applyMaskThresholdContrast(value: number, contrast = MASK_CONTRAST): number {
+  return clamp01((value - 0.5) * contrast + 0.5)
+}
+
+/**
+ * Convert a normalized 0–1 mask value into a signed local-Z displacement.
+ *
+ * Both modes keep geometry at or above the base surface so nothing is occluded
+ * by the underlying mesh:
+ * - Emboss: background flat, mask peaks raised outward.
+ * - Engrave: a thin raised slab with the mask carved back down to the surface,
+ *   which reads as a recessed/engraved pattern (a demo-safe alternative to a
+ *   true boolean cut).
+ */
+export function getDisplacementAmount(
+  maskValue: number,
+  mode: PatternMode,
+  depthWorld: number,
+): number {
+  const h = clamp01(maskValue)
+  return mode === 'engrave' ? (1 - h) * depthWorld : h * depthWorld
 }
 
 /**
@@ -64,7 +87,13 @@ function wrapUnit(value: number): number {
   return value - Math.floor(value)
 }
 
-/** Sample normalized height (0–1) from RGBA image data at pattern UV. */
+/**
+ * Sample a normalized, contrast-enhanced height (0–1) from RGBA image data.
+ *
+ * Height is luminance premultiplied by alpha (so transparent areas stay flat),
+ * then contrast-stretched. This is used identically for built-in patterns and
+ * uploaded custom textures — the image is only ever a height mask, never color.
+ */
 export function sampleHeightFromImageData(
   data: Uint8ClampedArray,
   width: number,
@@ -79,8 +108,8 @@ export function sampleHeightFromImageData(
   const g = data[idx + 1] / 255
   const b = data[idx + 2] / 255
   const a = data[idx + 3] / 255
-  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-  return luminance * a + (1 - a) * 0.08
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b
+  return applyMaskThresholdContrast(normalizeHeightMask(luminance * a))
 }
 
 export function samplePatternHeight(

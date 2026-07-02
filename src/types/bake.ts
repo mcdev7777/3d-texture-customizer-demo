@@ -1,22 +1,12 @@
-import type { PatternId, PatternMode, SurfacePatternSettings } from './pattern'
+import type { PatternId, PatternMode, SurfacePlaneData, SurfacePatternSettings } from './pattern'
 
 export type EmbossMode = PatternMode
 
-export type BakeStatus =
-  | 'idle'
-  | 'preview'
-  | 'bake-pending'
-  | 'baking'
-  | 'baked'
-  | 'export-ready'
-  | 'preparing'
-  | 'exporting'
-  | 'complete'
-  | 'error'
+export type BakeStatus = 'idle' | 'applying' | 'exporting' | 'error'
 
 export type ExportFormat = 'stl' | 'obj' | 'glb'
 
-/** Serializable placement used for baking, export, and variant storage. */
+/** Flattened placement (settings + planar islands) used for baking and export. */
 export interface PatternPlacement {
   surfaceId: string
   label: string
@@ -28,36 +18,16 @@ export interface PatternPlacement {
   depth: number
   mode: EmbossMode
   opacity: number
-  plane: {
-    center: [number, number, number]
-    normal: [number, number, number]
-    width: number
-    height: number
-    quaternion: [number, number, number, number]
-  }
-}
-
-export interface GeometryBakeOptions {
-  selectedSurfaceId?: string
-  placements: PatternPlacement[]
-  segmentCount?: number
-  maxDepth?: number
-  includeTextures?: boolean
-}
-
-export interface GeometryBakeResult {
-  object: import('three').Object3D
-  bakedMeshes: import('three').Mesh[]
-  warnings: string[]
+  planes: SurfacePlaneData[]
 }
 
 export function placementFromStoreEntry(
   surfaceId: string,
   label: string,
   settings: SurfacePatternSettings,
-  plane: PatternPlacement['plane'],
+  planes: SurfacePlaneData[],
 ): PatternPlacement | null {
-  if (!settings.patternId) return null
+  if (!settings.patternId || planes.length === 0) return null
   return {
     surfaceId,
     label,
@@ -69,7 +39,7 @@ export function placementFromStoreEntry(
     depth: settings.depth,
     mode: settings.mode,
     opacity: settings.opacity,
-    plane,
+    planes,
   }
 }
 

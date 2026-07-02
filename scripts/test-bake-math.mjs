@@ -40,13 +40,16 @@ assert('center maps with repeat 2 (wraps to 0)', Math.abs(u) < 0.001 && Math.abs
 const rotated = mapPanelUVToPatternUV(0.5, 0.5, { ...settings, rotation: 360 })
 assert('360 rotation preserves center', Math.abs(rotated[0] - u) < 0.01)
 
-const variant = {
-  id: 'test',
-  name: 'Test',
-  placements: [{ surfaceId: 'a', patternId: 'grid', depth: 0.04 }],
+// Engrave/emboss displacement direction (mirrors getDisplacementAmount)
+function getDisplacementAmount(mask, mode, depthWorld) {
+  const h = Math.min(1, Math.max(0, mask))
+  return mode === 'engrave' ? (1 - h) * depthWorld : h * depthWorld
 }
-const json = JSON.stringify(variant)
-const parsed = JSON.parse(json)
-assert('variant JSON round-trip', parsed.placements[0].patternId === 'grid')
+
+assert('emboss raises mask peaks', getDisplacementAmount(1, 'emboss', 0.1) > 0.09)
+assert('emboss keeps background flat', Math.abs(getDisplacementAmount(0, 'emboss', 0.1)) < 1e-9)
+assert('engrave differs from emboss', getDisplacementAmount(1, 'engrave', 0.1) !== getDisplacementAmount(1, 'emboss', 0.1))
+assert('engrave carves peaks down to surface', Math.abs(getDisplacementAmount(1, 'engrave', 0.1)) < 1e-9)
+assert('engrave raises background slab', getDisplacementAmount(0, 'engrave', 0.1) > 0.09)
 
 console.log('All bake math checks passed.')
