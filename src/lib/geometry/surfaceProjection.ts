@@ -1,5 +1,4 @@
-import { BufferGeometry, Matrix4, Quaternion, Vector3 } from 'three'
-import type { SurfacePlaneData } from '../../types/pattern'
+import { BufferGeometry, Vector3 } from 'three'
 
 /**
  * A stable local 2D coordinate frame for a selected surface, derived from the
@@ -25,7 +24,6 @@ export interface SurfaceProjection {
 
 const MIN_EXTENT = 0.05
 const _v = new Vector3()
-const _basis = new Matrix4()
 
 /**
  * Build a surface projection from the world-space highlight geometry of the
@@ -98,22 +96,5 @@ export function createSurfaceProjectionFromHighlight(
     maxV,
     width: Math.max(maxU - minU, MIN_EXTENT),
     height: Math.max(maxV - minV, MIN_EXTENT),
-  }
-}
-
-/**
- * Convert a projection into the SurfacePlaneData consumed by the patch builder.
- * The quaternion maps the patch's local +X → tangent, +Y → bitangent, +Z → normal,
- * so a PlaneGeometry's width/height line up exactly with the measured bounds.
- */
-export function surfacePlaneFromProjection(projection: SurfaceProjection): SurfacePlaneData {
-  _basis.makeBasis(projection.tangentWorld, projection.bitangentWorld, projection.normalWorld)
-  const quat = new Quaternion().setFromRotationMatrix(_basis)
-  return {
-    center: [projection.originWorld.x, projection.originWorld.y, projection.originWorld.z],
-    normal: [projection.normalWorld.x, projection.normalWorld.y, projection.normalWorld.z],
-    width: projection.width,
-    height: projection.height,
-    quaternion: [quat.x, quat.y, quat.z, quat.w],
   }
 }

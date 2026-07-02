@@ -58,9 +58,10 @@ Models are centered and scaled to fit the workspace on load. A sample model is i
 6. **Apply texture** commits the pattern as actual mesh geometry — emboss raises the
    surface outward, engrave recesses it. The surface keeps its original color and normals
    are recomputed. **Reset to original** clears applied geometry and textures.
-7. **Export Model** downloads the textured model as STL, OBJ, or GLB. Only applied geometry
-   is included — preview and selection helpers are never exported. GLB includes geometry and
-   material; STL and OBJ export geometry only.
+7. **Export Model** downloads the textured model as STL, OBJ, GLB, or 3MF. Only applied
+   geometry is included — preview and selection helpers are never exported. GLB includes
+   geometry and material; STL, OBJ, and 3MF export geometry only. 3MF is a print-ready
+   package for modern slicers.
 
 ## Viewer controls
 

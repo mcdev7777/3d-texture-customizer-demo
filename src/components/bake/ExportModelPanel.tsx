@@ -9,6 +9,7 @@ const FORMATS: Array<{ format: ExportFormat; label: string; note: string }> = [
   { format: 'stl', label: 'STL', note: 'Geometry only — slicers and printers.' },
   { format: 'obj', label: 'OBJ', note: 'Geometry only — most 3D editors.' },
   { format: 'glb', label: 'GLB', note: 'Geometry and material.' },
+  { format: '3mf', label: '3MF', note: 'Print package — modern slicers.' },
 ]
 
 export function ExportModelPanel() {

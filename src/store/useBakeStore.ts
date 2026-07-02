@@ -1,11 +1,8 @@
 import { create } from 'zustand'
 import { Group } from 'three'
 import type { BakeStatus, ExportFormat } from '../types/bake'
-import { placementFromStoreEntry } from '../types/bake'
-import {
-  buildExportableModifiedObject,
-  createPatchGroup,
-} from '../lib/geometry/bakePatternGeometry'
+import { buildExportableModifiedObject } from '../lib/geometry/bakePatternGeometry'
+import { buildReliefForSelection } from '../lib/geometry/reliefPatch'
 import { disposeObject } from '../lib/three/disposeObject'
 import { scheduleDisposeObject, disposeExportCloneGeometries } from '../lib/three/scheduleDispose'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
@@ -29,10 +26,8 @@ interface BakeState {
   committedSurfaceIds: string[]
   warnings: string[]
   error: string | null
-  segmentCount: number
   previewActive: boolean
 
-  setSegmentCount: (count: number) => void
   setPreviewActive: (active: boolean) => void
   /** Commit the currently selected surface's pattern into permanent relief geometry. */
   applyTexture: () => Promise<boolean>
@@ -64,11 +59,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
   committedSurfaceIds: [],
   warnings: [],
   error: null,
-  segmentCount: 64,
   previewActive: false,
-
-  setSegmentCount: (count) =>
-    set({ segmentCount: Math.min(128, Math.max(16, Math.floor(count))) }),
 
   setPreviewActive: (active) => set({ previewActive: active }),
 
@@ -86,10 +77,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
     }
 
     const entry = usePatternStore.getState().placements[selected.surfaceId]
-    const placement = entry
-      ? placementFromStoreEntry(selected.surfaceId, entry.label, entry.settings, entry.planes)
-      : null
-    if (!placement) {
+    if (!entry?.settings.patternId) {
       set({ status: 'error', error: 'Choose a texture before applying.' })
       return false
     }
@@ -98,8 +86,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
 
     try {
       const sourceMesh = findMeshByUuid(loadedModel.object, selected.meshUuid)
-      const { group: patchGroup, warnings } = createPatchGroup(placement, {
-        segmentCount: get().segmentCount,
+      const { group: patchGroup, warnings } = buildReliefForSelection(selected, entry.settings, {
         role: 'committed',
         sourceMaterial: sourceMesh?.material ?? null,
       })
