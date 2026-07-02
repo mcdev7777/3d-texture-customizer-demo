@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { X, Wand2 } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
 import { ToggleRow } from '../ui/ToggleRow'
@@ -33,13 +33,14 @@ export function SurfaceSelectionPanel() {
   const setConnectedOnly = useSurfaceSelectionStore((s) => s.setConnectedOnly)
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
   const clearSelection = useSurfaceSelectionStore((s) => s.clearSelection)
-  const recompute = useSurfaceSelectionStore((s) => s.recomputeFromLastPick)
-  const lastPick = useSurfaceSelectionStore((s) => s.lastPick)
+  const hasSeed = useSurfaceSelectionStore((s) => s.lastPick !== null)
 
   const modes: { id: SelectionMode; label: string }[] = [
     { id: 'surface', label: 'Surface' },
     { id: 'part', label: 'Part' },
   ]
+
+  const isSurfaceMode = selectionMode === 'surface'
 
   return (
     <Panel title="Selection" id="selection-panel">
@@ -70,8 +71,13 @@ export function SurfaceSelectionPanel() {
         ))}
       </div>
 
-      {selectionMode === 'surface' && (
+      {isSurfaceMode && (
         <div className="mt-4 pt-3 border-t border-purple-500/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-purple-300">Select by angle</span>
+            <span className="text-[10px] text-purple-400/70">live</span>
+          </div>
+
           <div>
             <label className="block text-xs text-slate-400 mb-2">
               Angle threshold — {angleTolerance.toFixed(0)}°
@@ -95,14 +101,13 @@ export function SurfaceSelectionPanel() {
             disabled={!hasModel}
           />
 
-          <Button
-            icon={<Wand2 className="h-3.5 w-3.5" />}
-            disabled={!lastPick}
-            onClick={recompute}
-            className="w-full text-xs"
-          >
-            Apply angle selection
-          </Button>
+          {enabled && hasModel && (
+            <p className="text-[11px] text-slate-400">
+              {hasSeed
+                ? 'Angle selection active — drag the threshold to grow or shrink the region.'
+                : 'Click a surface to start angle selection.'}
+            </p>
+          )}
         </div>
       )}
 
@@ -126,6 +131,7 @@ export function SurfaceSelectionPanel() {
             />
             <StatRow label="Mesh" value={selectedSurface.meshName} />
             <StatRow label="Faces" value={selectedSurface.triangleCount.toLocaleString()} />
+            {isSurfaceMode && <StatRow label="Threshold" value={`${angleTolerance.toFixed(0)}°`} />}
             <StatRow label="Normal" value={formatNormal(selectedSurface.normal)} />
             <StatRow label="Area" value={formatArea(selectedSurface.area)} />
           </div>
@@ -133,11 +139,11 @@ export function SurfaceSelectionPanel() {
           <p className="text-xs text-slate-500">
             {!hasModel
               ? 'Load a model to begin.'
-              : enabled
-                ? selectionMode === 'part'
-                  ? 'Click a part of the model to select the whole mesh.'
-                  : 'Click a surface on the model.'
-                : 'Enable selection to pick a surface or part.'}
+              : !enabled
+                ? 'Enable selection to pick a surface or part.'
+                : isSurfaceMode
+                  ? 'Click a surface to start angle selection.'
+                  : 'Click a part of the model to select the whole mesh.'}
           </p>
         )}
       </div>
