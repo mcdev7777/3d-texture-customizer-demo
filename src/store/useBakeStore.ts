@@ -1,203 +1,184 @@
 import { create } from 'zustand'
-import type { Object3D } from 'three'
-import type { BakeStatus, ExportFormat, PatternPlacement } from '../types/bake'
+import { Group } from 'three'
+import type { BakeStatus, ExportFormat } from '../types/bake'
+import { placementFromStoreEntry } from '../types/bake'
 import {
-  bakePatternGeometry,
-  collectPlacementsFromStore,
+  buildExportableModifiedObject,
+  createPatchGroup,
 } from '../lib/geometry/bakePatternGeometry'
-import { scheduleDisposeObject } from '../lib/three/scheduleDispose'
+import { disposeObject } from '../lib/three/disposeObject'
+import { scheduleDisposeObject, disposeExportCloneGeometries } from '../lib/three/scheduleDispose'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
+import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { useAppStore } from './useAppStore'
 import { usePatternStore } from './usePatternStore'
 import { useSurfaceSelectionStore } from './useSurfaceSelectionStore'
 
+/**
+ * Scene ownership model:
+ * - `useAppStore.loadedModel.object` = the untouched working model (also the reset source).
+ * - `committedGroup` = permanent applied relief patches, one per surface. Persists across
+ *   previews and is never cleared by preview changes.
+ * - Preview lives in `TexturePreviewOverlay` and only reflects the current selection.
+ */
 interface BakeState {
   status: BakeStatus
-  bakedObject: Object3D | null
-  bakedSurfaceIds: string[]
+  /** Persistent group holding all committed (applied) relief patches. */
+  committedGroup: Group
+  /** Surface ids that currently have a committed patch (drives re-renders). */
+  committedSurfaceIds: string[]
   warnings: string[]
   error: string | null
-  showBakedInScene: boolean
   segmentCount: number
-  autoBakeOnExport: boolean
   previewActive: boolean
 
-  markPending: () => void
-  setShowBakedInScene: (show: boolean) => void
   setSegmentCount: (count: number) => void
   setPreviewActive: (active: boolean) => void
-  clearBake: () => void
-  bake: () => Promise<boolean>
+  /** Commit the currently selected surface's pattern into permanent relief geometry. */
+  applyTexture: () => Promise<boolean>
+  /** Remove one committed surface patch. */
+  removeCommitted: (surfaceId: string) => void
+  /** Remove all committed patches and turn preview off (used by reset / model change). */
+  resetAll: () => void
   exportModel: (format: ExportFormat) => Promise<boolean>
 }
 
-function hasActivePlacements(): boolean {
-  const placements = usePatternStore.getState().placements
-  return Object.values(placements).some((p) => p.settings.patternId !== null)
+function createCommittedGroup(): Group {
+  const group = new Group()
+  group.name = 'CommittedTextureGroup'
+  group.userData.exportable = true
+  return group
 }
 
-function derivePreviewStatus(): BakeStatus {
-  if (!useAppStore.getState().loadedModel) return 'idle'
-  return hasActivePlacements() ? 'preview' : 'idle'
+function removeCommittedChild(group: Group, surfaceId: string): void {
+  const existing = group.children.find((c) => c.userData.surfaceId === surfaceId)
+  if (existing) {
+    group.remove(existing)
+    disposeObject(existing)
+  }
 }
 
 export const useBakeStore = create<BakeState>((set, get) => ({
   status: 'idle',
-  bakedObject: null,
-  bakedSurfaceIds: [],
+  committedGroup: createCommittedGroup(),
+  committedSurfaceIds: [],
   warnings: [],
   error: null,
-  showBakedInScene: true,
   segmentCount: 64,
-  autoBakeOnExport: true,
   previewActive: false,
 
-  markPending: () => {
-    const current = get()
-    if (
-      current.status === 'baking' ||
-      current.status === 'exporting' ||
-      current.status === 'preparing'
-    ) {
-      return
-    }
-
-    if (!hasActivePlacements()) {
-      const previous = current.bakedObject
-      set({
-        status: 'idle',
-        bakedObject: null,
-        bakedSurfaceIds: [],
-        warnings: [],
-        error: null,
-        previewActive: false,
-      })
-      scheduleDisposeObject(previous)
-      return
-    }
-
-    if (current.bakedObject) {
-      const previous = current.bakedObject
-      set({
-        status: 'bake-pending',
-        bakedObject: null,
-        bakedSurfaceIds: [],
-        warnings: [],
-        error: null,
-      })
-      scheduleDisposeObject(previous)
-      return
-    }
-
-    set({
-      status: 'preview',
-      error: null,
-    })
-  },
-
-  setShowBakedInScene: (show) => set({ showBakedInScene: show }),
+  setSegmentCount: (count) =>
+    set({ segmentCount: Math.min(128, Math.max(16, Math.floor(count))) }),
 
   setPreviewActive: (active) => set({ previewActive: active }),
 
-  setSegmentCount: (count) => {
-    set({ segmentCount: Math.min(128, Math.max(16, Math.floor(count))) })
-    get().markPending()
-  },
-
-  clearBake: () => {
-    const previous = get().bakedObject
-    set({
-      status: derivePreviewStatus(),
-      bakedObject: null,
-      bakedSurfaceIds: [],
-      warnings: [],
-      error: null,
-      previewActive: false,
-    })
-    scheduleDisposeObject(previous)
-  },
-
-  bake: async () => {
+  applyTexture: async () => {
     const loadedModel = useAppStore.getState().loadedModel
     if (!loadedModel) {
-      set({ status: 'error', error: 'Load a model before baking.' })
+      set({ status: 'error', error: 'Load a model before applying a texture.' })
       return false
     }
 
-    const placements = collectPlacementsFromStore(usePatternStore.getState().placements)
-    if (placements.length === 0) {
-      set({ status: 'error', error: 'Apply at least one pattern before baking.' })
+    const selected = useSurfaceSelectionStore.getState().selectedSurface
+    if (!selected) {
+      set({ status: 'error', error: 'Select a surface or part first.' })
       return false
     }
 
-    const selectedSurfaceId = useSurfaceSelectionStore.getState().selectedSurface?.surfaceId
+    const entry = usePatternStore.getState().placements[selected.surfaceId]
+    const placement = entry
+      ? placementFromStoreEntry(selected.surfaceId, entry.label, entry.settings, entry.planes)
+      : null
+    if (!placement) {
+      set({ status: 'error', error: 'Choose a texture before applying.' })
+      return false
+    }
 
-    set({ status: 'baking', error: null, warnings: [] })
+    set({ status: 'applying', error: null, warnings: [] })
 
     try {
-      const previous = get().bakedObject
-      set({ bakedObject: null, bakedSurfaceIds: [] })
-      scheduleDisposeObject(previous)
-
-      const result = await bakePatternGeometry(loadedModel.object, {
-        placements,
-        selectedSurfaceId,
+      const sourceMesh = findMeshByUuid(loadedModel.object, selected.meshUuid)
+      const { group: patchGroup, warnings } = createPatchGroup(placement, {
         segmentCount: get().segmentCount,
-        includeTextures: true,
+        role: 'committed',
+        sourceMaterial: sourceMesh?.material ?? null,
       })
 
+      const group = get().committedGroup
+      // Re-applying to the same surface replaces its previous patch only.
+      removeCommittedChild(group, selected.surfaceId)
+      group.add(patchGroup)
+
+      const committedSurfaceIds = get().committedSurfaceIds.includes(selected.surfaceId)
+        ? get().committedSurfaceIds
+        : [...get().committedSurfaceIds, selected.surfaceId]
+
       set({
-        status: 'export-ready',
-        bakedObject: result.object,
-        bakedSurfaceIds: placements.map((p) => p.surfaceId),
-        warnings: result.warnings,
+        status: 'idle',
+        committedSurfaceIds,
+        warnings,
         error: null,
         previewActive: false,
       })
       return true
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Bake failed.'
+      const message = err instanceof Error ? err.message : 'Apply failed.'
       set({ status: 'error', error: message })
       return false
     }
   },
 
+  removeCommitted: (surfaceId) => {
+    const group = get().committedGroup
+    removeCommittedChild(group, surfaceId)
+    set({
+      committedSurfaceIds: get().committedSurfaceIds.filter((id) => id !== surfaceId),
+    })
+  },
+
+  resetAll: () => {
+    const group = get().committedGroup
+    const removed = [...group.children]
+    group.clear()
+    set({
+      status: 'idle',
+      committedSurfaceIds: [],
+      warnings: [],
+      error: null,
+      previewActive: false,
+    })
+    removed.forEach((child) => scheduleDisposeObject(child))
+  },
+
   exportModel: async (format) => {
-    set({ error: null })
-
-    let object = get().bakedObject
-    if (!object && get().autoBakeOnExport) {
-      set({ status: 'preparing' })
-      const baked = await get().bake()
-      if (!baked) return false
-      object = get().bakedObject
-    }
-
-    if (!object) {
-      set({
-        status: 'error',
-        error: 'Bake geometry first, or enable auto-bake on export.',
-      })
+    const loadedModel = useAppStore.getState().loadedModel
+    if (!loadedModel) {
+      set({ status: 'error', error: 'Load a model before exporting.' })
       return false
     }
 
-    const fileName = useAppStore.getState().fileName?.replace(/\.[^.]+$/, '') ?? 'crate3d-model'
+    const group = get().committedGroup
+    if (group.children.length === 0) {
+      set({ status: 'error', error: 'Apply a texture before exporting.' })
+      return false
+    }
 
-    set({ status: 'exporting' })
+    const fileName = 'crate3d-textured-model'
+
+    set({ status: 'exporting', error: null })
+
+    const exportObject = buildExportableModifiedObject(loadedModel.object, group)
     try {
-      await exportModifiedModel({ object, format, fileName })
-      set({ status: 'complete', error: null })
+      await exportModifiedModel({ object: exportObject, format, fileName })
+      set({ status: 'idle', error: null })
       return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Export failed.'
       set({ status: 'error', error: message })
       return false
+    } finally {
+      // Dispose only the geometry clones we created — materials are shared with the live scene.
+      disposeExportCloneGeometries(exportObject)
     }
   },
 }))
-
-export function placementsToSerializable(
-  placements: ReturnType<typeof usePatternStore.getState>['placements'],
-): PatternPlacement[] {
-  return collectPlacementsFromStore(placements)
-}

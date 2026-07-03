@@ -3,7 +3,7 @@ import {
   MousePointerClick,
   Grid3x3,
   Layers,
-  Save,
+  Download,
   Box,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -27,7 +27,7 @@ export function Sidebar() {
     { id: 'select', label: 'Select', icon: MousePointerClick, target: 'selection-panel' },
     { id: 'library', label: 'Texture Library', icon: Grid3x3, target: 'patterns-panel' },
     { id: 'apply', label: 'Apply Texture', icon: Layers, target: 'texture-panel' },
-    { id: 'variations', label: 'Variations', icon: Save, target: 'variants-panel' },
+    { id: 'export', label: 'Export Model', icon: Download, target: 'export-panel' },
   ]
 
   return (

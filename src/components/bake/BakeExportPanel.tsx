@@ -1,64 +1,62 @@
-import { useState } from 'react'
-import { Download, Hammer, Eye, EyeOff, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Hammer, Eye, EyeOff, AlertTriangle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
 import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
 import { useAppStore } from '../../store/useAppStore'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { useBakeStore } from '../../store/useBakeStore'
-import type { ExportFormat } from '../../types/bake'
-
-const FORMAT_NOTES: Record<ExportFormat, string> = {
-  glb: 'GLB includes geometry and texture/material.',
-  stl: 'STL exports geometry only.',
-  obj: 'OBJ exports geometry only.',
-}
 
 export function BakeExportPanel() {
   const hasModel = useAppStore((s) => !!s.loadedModel)
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
   const placements = usePatternStore((s) => s.placements)
-  const hasPattern = Object.values(placements).some((p) => p.settings.patternId)
 
   const status = useBakeStore((s) => s.status)
   const error = useBakeStore((s) => s.error)
   const warnings = useBakeStore((s) => s.warnings)
   const previewActive = useBakeStore((s) => s.previewActive)
-  const showBakedInScene = useBakeStore((s) => s.showBakedInScene)
-  const bake = useBakeStore((s) => s.bake)
-  const exportModel = useBakeStore((s) => s.exportModel)
+  const committedSurfaceIds = useBakeStore((s) => s.committedSurfaceIds)
+  const applyTexture = useBakeStore((s) => s.applyTexture)
   const setPreviewActive = useBakeStore((s) => s.setPreviewActive)
-  const setShowBakedInScene = useBakeStore((s) => s.setShowBakedInScene)
-  const clearBake = useBakeStore((s) => s.clearBake)
+  const resetAll = useBakeStore((s) => s.resetAll)
 
-  const [format, setFormat] = useState<ExportFormat>('glb')
-  const isBusy = status === 'baking' || status === 'exporting' || status === 'preparing'
-  const isApplied = status === 'export-ready' || status === 'complete'
+  const selectedPlacement = selectedSurface ? placements[selectedSurface.surfaceId] : undefined
+  const selectedHasPattern = !!selectedPlacement?.settings.patternId
+  const appliedCount = committedSurfaceIds.length
+  const hasApplied = appliedCount > 0
+
+  const isBusy = status === 'applying' || status === 'exporting'
 
   const statusText = isBusy
-    ? status === 'baking'
+    ? status === 'applying'
       ? 'Applying geometry…'
-      : 'Exporting…'
-    : isApplied
-      ? 'Applied — real geometry ready'
-      : status === 'error'
-        ? 'Error'
-        : previewActive && hasPattern
-          ? 'Preview active'
-          : hasPattern
-            ? 'Ready to preview'
+      : 'Working…'
+    : status === 'error'
+      ? 'Error'
+      : previewActive && selectedHasPattern
+        ? 'Preview active'
+        : hasApplied
+          ? `${appliedCount} surface${appliedCount === 1 ? '' : 's'} textured`
+          : selectedHasPattern
+            ? 'Ready to apply'
             : 'Choose a texture'
+
+  const handleResetOriginal = () => {
+    usePatternStore.getState().clearAll()
+    useSurfaceSelectionStore.getState().clearSelection()
+    resetAll()
+  }
 
   return (
     <Panel title="Apply Texture" id="texture-panel">
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-xs">
-          {isApplied ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+          {isBusy ? (
+            <Loader2 className="h-3.5 w-3.5 text-purple-400 loading-spinner shrink-0" />
           ) : status === 'error' ? (
             <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-          ) : isBusy ? (
-            <Loader2 className="h-3.5 w-3.5 text-purple-400 loading-spinner shrink-0" />
+          ) : hasApplied ? (
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
           ) : (
             <span className="h-2 w-2 rounded-full bg-purple-500/60 shrink-0" />
           )}
@@ -68,29 +66,29 @@ export function BakeExportPanel() {
         {!selectedSurface && hasModel && (
           <p className="text-[11px] text-amber-400/90">Select a surface or part first.</p>
         )}
-        {selectedSurface && !hasPattern && (
+        {selectedSurface && !selectedHasPattern && (
           <p className="text-[11px] text-amber-400/90">Choose a texture from the library.</p>
         )}
 
         <div className="grid grid-cols-2 gap-2">
           <Button
             icon={previewActive ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            disabled={!hasPattern || isBusy}
+            disabled={!selectedHasPattern || isBusy}
             onClick={() => setPreviewActive(!previewActive)}
             className="text-xs"
           >
-            {previewActive ? 'Reset preview' : 'Preview'}
+            {previewActive ? 'Hide preview' : 'Preview'}
           </Button>
           <Button
             icon={
-              isBusy && status === 'baking' ? (
+              status === 'applying' ? (
                 <Loader2 className="h-3.5 w-3.5 loading-spinner" />
               ) : (
                 <Hammer className="h-3.5 w-3.5" />
               )
             }
-            disabled={!hasPattern || isBusy}
-            onClick={() => void bake()}
+            disabled={!selectedHasPattern || isBusy}
+            onClick={() => void applyTexture()}
             className="text-xs"
             variant="primary"
           >
@@ -99,61 +97,22 @@ export function BakeExportPanel() {
         </div>
 
         <p className="text-[10px] text-slate-500">
-          Apply converts the texture into real printable mesh geometry. Emboss raises the surface,
-          engrave recesses it.
+          Apply turns the pattern into real relief on the surface. Emboss raises it, engrave
+          recesses it. The surface keeps its original color. Works on a single surface or a whole
+          part.
         </p>
 
-        {isApplied && (
-          <div className="space-y-2 pt-2 border-t border-purple-500/10">
-            <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showBakedInScene}
-                onChange={(e) => setShowBakedInScene(e.target.checked)}
-                className="accent-purple-500"
-              />
-              Show applied geometry
-            </label>
-
-            <div className="space-y-1.5">
-              <div className="flex gap-2">
-                <select
-                  value={format}
-                  onChange={(e) => setFormat(e.target.value as ExportFormat)}
-                  className="flex-1 min-w-0 rounded-lg border border-purple-500/20 bg-navy-900/80 px-2 py-1.5 text-xs text-slate-200"
-                >
-                  <option value="glb">GLB</option>
-                  <option value="stl">STL</option>
-                  <option value="obj">OBJ</option>
-                </select>
-                <Button
-                  icon={
-                    isBusy && status === 'exporting' ? (
-                      <Loader2 className="h-3.5 w-3.5 loading-spinner" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5" />
-                    )
-                  }
-                  disabled={isBusy}
-                  onClick={() => void exportModel(format)}
-                  className="text-xs px-2 shrink-0"
-                >
-                  Export
-                </Button>
-              </div>
-              <p className="text-[10px] text-slate-500">{FORMAT_NOTES[format]}</p>
-            </div>
-
-            <Button
-              disabled={isBusy}
-              onClick={clearBake}
-              className="w-full text-xs"
-              variant="ghost"
-            >
-              Clear applied geometry
-            </Button>
-          </div>
-        )}
+        <div className="pt-2 border-t border-purple-500/10">
+          <Button
+            icon={<RotateCcw className="h-3.5 w-3.5" />}
+            disabled={(!hasApplied && !selectedSurface) || isBusy}
+            onClick={handleResetOriginal}
+            className="w-full text-xs"
+            variant="ghost"
+          >
+            Reset to original
+          </Button>
+        </div>
 
         {error && <p className="text-[11px] text-red-400">{error}</p>}
 

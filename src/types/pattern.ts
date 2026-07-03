@@ -1,4 +1,4 @@
-export type PatternId =
+export type BuiltinPatternId =
   | 'hex'
   | 'grid'
   | 'diamond'
@@ -12,7 +12,14 @@ export type PatternId =
   | 'crosshatch'
   | 'cracks'
 
-export type PatternCategory = 'geometric' | 'organic' | 'lines' | 'surface'
+/**
+ * A pattern id is either one of the built-in patterns or a custom uploaded
+ * texture id (e.g. "custom-1720000000000"). The `(string & {})` keeps literal
+ * autocomplete for the built-ins while allowing arbitrary custom ids.
+ */
+export type PatternId = BuiltinPatternId | (string & {})
+
+export type PatternCategory = 'geometric' | 'organic' | 'lines' | 'surface' | 'custom'
 
 export type PatternMode = 'emboss' | 'engrave'
 
@@ -59,5 +66,10 @@ export interface SurfacePatternPlacement {
   surfaceId: string
   label: string
   settings: SurfacePatternSettings
-  plane: SurfacePlaneData
+  /**
+   * One oriented plane per planar island of the selection. A single flat surface
+   * has one plane; a whole part has one plane per major face orientation so the
+   * texture wraps each side correctly instead of a single skewed rectangle.
+   */
+  planes: SurfacePlaneData[]
 }

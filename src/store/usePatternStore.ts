@@ -6,7 +6,7 @@ import type {
   SurfacePatternSettings,
 } from '../types/pattern'
 import { DEFAULT_PATTERN_SETTINGS } from '../types/pattern'
-import { computeSurfacePlaneFromHighlight } from '../lib/surface/computeSurfacePlane'
+import { buildSurfacePlanesFromHighlight } from '../lib/geometry/planarIslands'
 import { getSurfaceId, getSurfaceLabel } from '../lib/surface/getSurfaceId'
 import { disposePatternTextures, getPatternDefinition } from '../utils/patternTextures'
 
@@ -22,18 +22,23 @@ interface PatternState {
   clearAll: () => void
 }
 
+function surfaceKey(surface: SelectedSurface): string {
+  // Part selections use faceIndex -1 so the whole mesh maps to one placement key.
+  const faceIndex = surface.selectionType === 'part' ? -1 : surface.faceIndex
+  return getSurfaceId(surface.meshUuid, faceIndex)
+}
+
 function buildPlacement(surface: SelectedSurface): Omit<SurfacePatternPlacement, 'settings'> {
-  const surfaceId = getSurfaceId(surface.meshUuid, surface.faceIndex)
-  const plane = computeSurfacePlaneFromHighlight(
+  const planes = buildSurfacePlanesFromHighlight(
     surface.highlightGeometry,
     surface.normal,
     surface.point,
   )
 
   return {
-    surfaceId,
+    surfaceId: surfaceKey(surface),
     label: getSurfaceLabel(surface.meshName, surface.faceIndex),
-    plane,
+    planes,
   }
 }
 
@@ -85,7 +90,7 @@ export const usePatternStore = create<PatternState>((set, get) => ({
   },
 
   syncSurfacePlane: (surface) => {
-    const surfaceId = getSurfaceId(surface.meshUuid, surface.faceIndex)
+    const surfaceId = surfaceKey(surface)
     const current = get().placements[surfaceId]
     if (!current?.settings.patternId) return
 
@@ -96,7 +101,7 @@ export const usePatternStore = create<PatternState>((set, get) => ({
         [surfaceId]: {
           ...current,
           label: base.label,
-          plane: base.plane,
+          planes: base.planes,
         },
       },
     })
