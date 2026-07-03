@@ -141,8 +141,7 @@ export function sampleReliefHeight(
       pu,
       pv,
     )
-    // Soft threshold keeps uploaded art crisp without hard pixel steps.
-    return smoothstep(0.15, 0.85, raw)
+    return smoothstep(0.08, 0.95, raw)
   }
   return 0
 }
