@@ -36,8 +36,7 @@ export function Sidebar() {
         <div className="flex items-center gap-2">
           <Box className="h-5 w-5 text-purple-400" />
           <div>
-            <h1 className="text-sm font-semibold text-white leading-tight">Spoolara</h1>
-            <p className="text-[10px] text-purple-400/80">Texture Studio</p>
+            <h1 className="text-sm font-semibold text-white leading-tight">Texture Studio</h1>
           </div>
         </div>
       </div>

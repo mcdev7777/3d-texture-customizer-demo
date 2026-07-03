@@ -1,4 +1,4 @@
-# Spoolara Texture Studio
+# Texture Studio
 
 Add real, printable surface textures to 3D models. Load a model, select a surface or
 part, pick a built-in or custom texture, dial in the look, apply it as actual displaced

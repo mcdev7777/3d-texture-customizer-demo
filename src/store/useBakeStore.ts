@@ -1,61 +1,28 @@
 import { create } from 'zustand'
-import { Group } from 'three'
 import type { BakeStatus, ExportFormat } from '../types/bake'
-import { buildExportableModifiedObject } from '../lib/geometry/bakePatternGeometry'
-import { buildReliefForSelection } from '../lib/geometry/reliefPatch'
-import { disposeObject } from '../lib/three/disposeObject'
-import { scheduleDisposeObject, disposeExportCloneGeometries } from '../lib/three/scheduleDispose'
+import { commitGeometry, resetAllGeometries } from '../lib/geometry/bakeInPlace'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { useAppStore } from './useAppStore'
 import { usePatternStore } from './usePatternStore'
 import { useSurfaceSelectionStore } from './useSurfaceSelectionStore'
 
-/**
- * Scene ownership model:
- * - `useAppStore.loadedModel.object` = the untouched working model (also the reset source).
- * - `committedGroup` = permanent applied relief patches, one per surface. Persists across
- *   previews and is never cleared by preview changes.
- * - Preview lives in `TexturePreviewOverlay` and only reflects the current selection.
- */
 interface BakeState {
   status: BakeStatus
-  /** Persistent group holding all committed (applied) relief patches. */
-  committedGroup: Group
-  /** Surface ids that currently have a committed patch (drives re-renders). */
   committedSurfaceIds: string[]
   warnings: string[]
   error: string | null
   previewActive: boolean
 
   setPreviewActive: (active: boolean) => void
-  /** Commit the currently selected surface's pattern into permanent relief geometry. */
   applyTexture: () => Promise<boolean>
-  /** Remove one committed surface patch. */
   removeCommitted: (surfaceId: string) => void
-  /** Remove all committed patches and turn preview off (used by reset / model change). */
   resetAll: () => void
   exportModel: (format: ExportFormat) => Promise<boolean>
 }
 
-function createCommittedGroup(): Group {
-  const group = new Group()
-  group.name = 'CommittedTextureGroup'
-  group.userData.exportable = true
-  return group
-}
-
-function removeCommittedChild(group: Group, surfaceId: string): void {
-  const existing = group.children.find((c) => c.userData.surfaceId === surfaceId)
-  if (existing) {
-    group.remove(existing)
-    disposeObject(existing)
-  }
-}
-
 export const useBakeStore = create<BakeState>((set, get) => ({
   status: 'idle',
-  committedGroup: createCommittedGroup(),
   committedSurfaceIds: [],
   warnings: [],
   error: null,
@@ -86,15 +53,12 @@ export const useBakeStore = create<BakeState>((set, get) => ({
 
     try {
       const sourceMesh = findMeshByUuid(loadedModel.object, selected.meshUuid)
-      const { group: patchGroup, warnings } = buildReliefForSelection(selected, entry.settings, {
-        role: 'committed',
-        sourceMaterial: sourceMesh?.material ?? null,
-      })
+      if (!sourceMesh) {
+        set({ status: 'error', error: 'Could not find mesh in model.' })
+        return false
+      }
 
-      const group = get().committedGroup
-      // Re-applying to the same surface replaces its previous patch only.
-      removeCommittedChild(group, selected.surfaceId)
-      group.add(patchGroup)
+      commitGeometry(sourceMesh, selected, entry.settings)
 
       const committedSurfaceIds = get().committedSurfaceIds.includes(selected.surfaceId)
         ? get().committedSurfaceIds
@@ -103,7 +67,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       set({
         status: 'idle',
         committedSurfaceIds,
-        warnings,
+        warnings: [],
         error: null,
         previewActive: false,
       })
@@ -115,18 +79,14 @@ export const useBakeStore = create<BakeState>((set, get) => ({
     }
   },
 
-  removeCommitted: (surfaceId) => {
-    const group = get().committedGroup
-    removeCommittedChild(group, surfaceId)
-    set({
-      committedSurfaceIds: get().committedSurfaceIds.filter((id) => id !== surfaceId),
-    })
+  removeCommitted: (_surfaceId) => {
+    // Per-surface undo is not supported in the in-place approach;
+    // use resetAll instead.
   },
 
   resetAll: () => {
-    const group = get().committedGroup
-    const removed = [...group.children]
-    group.clear()
+    const loadedModel = useAppStore.getState().loadedModel
+    resetAllGeometries(loadedModel?.object ?? null)
     set({
       status: 'idle',
       committedSurfaceIds: [],
@@ -134,7 +94,6 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       error: null,
       previewActive: false,
     })
-    removed.forEach((child) => scheduleDisposeObject(child))
   },
 
   exportModel: async (format) => {
@@ -144,28 +103,23 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       return false
     }
 
-    const group = get().committedGroup
-    if (group.children.length === 0) {
+    if (get().committedSurfaceIds.length === 0) {
       set({ status: 'error', error: 'Apply a texture before exporting.' })
       return false
     }
 
-    const fileName = 'crate3d-textured-model'
+    const fileName = useAppStore.getState().fileName?.replace(/\.[^.]+$/, '') ?? 'textured-model'
 
     set({ status: 'exporting', error: null })
 
-    const exportObject = buildExportableModifiedObject(loadedModel.object, group)
     try {
-      await exportModifiedModel({ object: exportObject, format, fileName })
+      await exportModifiedModel({ object: loadedModel.object, format, fileName })
       set({ status: 'idle', error: null })
       return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Export failed.'
       set({ status: 'error', error: message })
       return false
-    } finally {
-      // Dispose only the geometry clones we created — materials are shared with the live scene.
-      disposeExportCloneGeometries(exportObject)
     }
   },
 }))

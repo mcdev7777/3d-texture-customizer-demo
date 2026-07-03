@@ -78,7 +78,7 @@ export async function exportModifiedModel(params: {
   fileName?: string
 }): Promise<void> {
   const { object, format } = params
-  const baseName = params.fileName ?? 'crate3d-model'
+  const baseName = params.fileName ?? 'textured-model'
   const exportRoot = prepareExportRoot(object)
 
   try {

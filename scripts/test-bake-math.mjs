@@ -99,4 +99,57 @@ assert(
   grid(0.08, 0.5) > 0.05 && grid(0.08, 0.5) < 0.95,
 )
 
+// Bilinear sampling (mirror of patternPlacementMath.sampleImageHeightBilinear)
+function sampleImageHeightBilinear(data, width, height, u, v) {
+  const fx = frac(u) * width - 0.5
+  const fy = frac(1 - v) * height - 0.5
+  const x0 = Math.floor(fx)
+  const y0 = Math.floor(fy)
+  const tx = fx - x0
+  const ty = fy - y0
+  const lum = (px, py) => {
+    const wx = ((px % width) + width) % width
+    const wy = ((py % height) + height) % height
+    const idx = (wy * width + wx) * 4
+    const a = data[idx + 3] / 255
+    return (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) / 255 * a
+  }
+  const top = lum(x0, y0) * (1 - tx) + lum(x0 + 1, y0) * tx
+  const bottom = lum(x0, y0 + 1) * (1 - tx) + lum(x0 + 1, y0 + 1) * tx
+  return top * (1 - ty) + bottom * ty
+}
+
+// 2x2 white pixel image for bilinear sampling test
+const whiteData = new Uint8ClampedArray([255,255,255,255, 255,255,255,255,
+                                         255,255,255,255, 255,255,255,255])
+assert('bilinear: white image returns ~1', Math.abs(sampleImageHeightBilinear(whiteData, 2, 2, 0.5, 0.5) - 1) < 0.01)
+
+const blackData = new Uint8ClampedArray(16) // all zeros
+assert('bilinear: black image returns ~0', sampleImageHeightBilinear(blackData, 2, 2, 0.5, 0.5) < 0.01)
+
+// Tiling wrap: u=0 and u=1 must produce the same sample
+const tiledA = sampleImageHeightBilinear(whiteData, 2, 2, 0.0, 0.5)
+const tiledB = sampleImageHeightBilinear(whiteData, 2, 2, 1.0, 0.5)
+assert('bilinear: tiling u-wrap (u=0 == u=1)', Math.abs(tiledA - tiledB) < 1e-6)
+
+// Height threshold (0.08/0.95 update) — crisp patterns
+const lowThresh = smoothstep(0.08, 0.95, 0.04)
+const highThresh = smoothstep(0.08, 0.95, 0.98)
+assert('threshold: near-black stays near 0', lowThresh < 0.01)
+assert('threshold: near-white stays near 1', highThresh > 0.99)
+const midThresh = smoothstep(0.08, 0.95, 0.5)
+assert('threshold: midpoint is reasonable', midThresh > 0.3 && midThresh < 0.7)
+
+// Mapping rotation: 90° rotates tangent/bitangent
+const s90 = { scale: 1, rotation: 90, offsetX: 0, offsetY: 0 }
+const [u90, v90] = worldToPatternUV(1, 0, s90)
+assert('rotation 90°: u-world becomes mostly v-pattern', Math.abs(u90) < 0.01)
+assert('rotation 90°: v-pattern is nonzero', Math.abs(v90) > 0.5)
+
+// Emboss: white areas = outward, black areas = flat (critical behavior check)
+const embossWhite = getReliefDisplacement(1.0, 'emboss', 0.11)
+const embossBlack = getReliefDisplacement(0.0, 'emboss', 0.11)
+assert('emboss: white extrudes outward', embossWhite > 0.1)
+assert('emboss: black stays flat (zero displacement)', embossBlack < 1e-6)
+
 console.log('All relief math checks passed.')

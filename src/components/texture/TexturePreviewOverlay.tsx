@@ -1,18 +1,20 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useRef } from 'react'
+import type { Mesh } from 'three'
 import { useAppStore } from '../../store/useAppStore'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { useBakeStore } from '../../store/useBakeStore'
-import { buildReliefForSelection } from '../../lib/geometry/reliefPatch'
-import { disposeObject } from '../../lib/three/disposeObject'
+import {
+  applyPreviewGeometry,
+  removePreviewGeometry,
+} from '../../lib/geometry/bakeInPlace'
 import { findMeshByUuid } from '../../lib/surface/restoreSurfaceFromId'
 
 /**
- * Live preview of the selected surface/part texture rendered as real displaced
- * geometry. Surface selections build one island; part selections build one relief
- * patch per major face so nothing floats or explodes. Emboss raises outward,
- * engrave reads as recessed. The preview only ever represents the current
- * selection — it is added/removed on its own and never touches committed geometry.
+ * Headless component that manages the live preview by temporarily swapping
+ * the selected mesh's geometry with a displaced clone. No overlay mesh is
+ * created — the original mesh is modified in-place and restored when the
+ * preview is deactivated or settings change.
  */
 export function TexturePreviewOverlay() {
   const modelObject = useAppStore((s) => s.loadedModel?.object)
@@ -24,26 +26,35 @@ export function TexturePreviewOverlay() {
   const previewActive = useBakeStore((s) => s.previewActive)
 
   const settings = placement?.settings
+  const lastMeshRef = useRef<Mesh | null>(null)
 
-  const group = useMemo(() => {
-    if (!previewActive || !selectedSurface || !settings?.patternId) {
-      return null
+  useEffect(() => {
+    if (!modelObject || !selectedSurface || !settings?.patternId || !previewActive) {
+      if (lastMeshRef.current) {
+        removePreviewGeometry(lastMeshRef.current)
+        lastMeshRef.current = null
+      }
+      return
     }
 
-    const sourceMesh =
-      modelObject && selectedSurface.meshUuid
-        ? findMeshByUuid(modelObject, selectedSurface.meshUuid)
-        : null
+    const mesh = findMeshByUuid(modelObject, selectedSurface.meshUuid)
+    if (!mesh) return
+
+    lastMeshRef.current = mesh
 
     try {
-      return buildReliefForSelection(selectedSurface, settings, {
-        role: 'preview',
-        sourceMaterial: sourceMesh?.material ?? null,
-      }).group
+      applyPreviewGeometry(mesh, selectedSurface, settings)
     } catch {
-      return null
+      removePreviewGeometry(mesh)
+      lastMeshRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    return () => {
+      if (lastMeshRef.current) {
+        removePreviewGeometry(lastMeshRef.current)
+        lastMeshRef.current = null
+      }
+    }
   }, [
     previewActive,
     selectedSurface,
@@ -58,13 +69,5 @@ export function TexturePreviewOverlay() {
     settings?.opacity,
   ])
 
-  useEffect(() => {
-    return () => {
-      if (group) disposeObject(group)
-    }
-  }, [group])
-
-  if (!group) return null
-
-  return <primitive object={group} dispose={null} />
+  return null
 }
