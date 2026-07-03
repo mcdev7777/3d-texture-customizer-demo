@@ -5,16 +5,15 @@ import { usePatternStore } from '../../store/usePatternStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { useBakeStore } from '../../store/useBakeStore'
 import {
-  applyPreviewGeometry,
-  removePreviewGeometry,
-} from '../../lib/geometry/bakeInPlace'
+  applyPreviewPattern,
+  removePreviewPattern,
+} from '../../lib/materials/patternMaterialApply'
 import { findMeshByUuid } from '../../lib/surface/restoreSurfaceFromId'
 
 /**
- * Headless component that manages the live preview by temporarily swapping
- * the selected mesh's geometry with a displaced clone. No overlay mesh is
- * created — the original mesh is modified in-place and restored when the
- * preview is deactivated or settings change.
+ * Headless component that previews the pattern as a material replacement on
+ * the selected mesh — white pattern areas keep the surface base color, black
+ * areas use a darker emphasis tint with bump shading (no geometry extrusion).
  */
 export function TexturePreviewOverlay() {
   const modelObject = useAppStore((s) => s.loadedModel?.object)
@@ -31,7 +30,7 @@ export function TexturePreviewOverlay() {
   useEffect(() => {
     if (!modelObject || !selectedSurface || !settings?.patternId || !previewActive) {
       if (lastMeshRef.current) {
-        removePreviewGeometry(lastMeshRef.current)
+        removePreviewPattern(lastMeshRef.current)
         lastMeshRef.current = null
       }
       return
@@ -43,15 +42,15 @@ export function TexturePreviewOverlay() {
     lastMeshRef.current = mesh
 
     try {
-      applyPreviewGeometry(mesh, selectedSurface, settings)
+      applyPreviewPattern(mesh, selectedSurface, settings)
     } catch {
-      removePreviewGeometry(mesh)
+      removePreviewPattern(mesh)
       lastMeshRef.current = null
     }
 
     return () => {
       if (lastMeshRef.current) {
-        removePreviewGeometry(lastMeshRef.current)
+        removePreviewPattern(lastMeshRef.current)
         lastMeshRef.current = null
       }
     }

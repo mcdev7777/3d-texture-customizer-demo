@@ -8,6 +8,7 @@ import type {
 import { DEFAULT_PATTERN_SETTINGS } from '../types/pattern'
 import { getSurfaceId, getSurfaceLabel } from '../lib/surface/getSurfaceId'
 import { disposePatternTextures, getPatternDefinition } from '../utils/patternTextures'
+import { disposePatternTextureCache } from '../lib/materials/patternTexture'
 
 interface PatternState {
   placements: Record<string, SurfacePatternPlacement>
@@ -83,5 +84,6 @@ export const usePatternStore = create<PatternState>((set, get) => ({
   clearAll: () => {
     set({ placements: {} })
     disposePatternTextures()
+    disposePatternTextureCache()
   },
 }))
