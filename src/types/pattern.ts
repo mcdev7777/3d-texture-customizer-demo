@@ -54,22 +54,8 @@ export const SCALE_MAX = 5
 export const ROTATION_MIN = 0
 export const ROTATION_MAX = 360
 
-export interface SurfacePlaneData {
-  center: [number, number, number]
-  normal: [number, number, number]
-  width: number
-  height: number
-  quaternion: [number, number, number, number]
-}
-
 export interface SurfacePatternPlacement {
   surfaceId: string
   label: string
   settings: SurfacePatternSettings
-  /**
-   * One oriented plane per planar island of the selection. A single flat surface
-   * has one plane; a whole part has one plane per major face orientation so the
-   * texture wraps each side correctly instead of a single skewed rectangle.
-   */
-  planes: SurfacePlaneData[]
 }

@@ -6,7 +6,6 @@ import type {
   SurfacePatternSettings,
 } from '../types/pattern'
 import { DEFAULT_PATTERN_SETTINGS } from '../types/pattern'
-import { buildSurfacePlanesFromHighlight } from '../lib/geometry/planarIslands'
 import { getSurfaceId, getSurfaceLabel } from '../lib/surface/getSurfaceId'
 import { disposePatternTextures, getPatternDefinition } from '../utils/patternTextures'
 
@@ -17,7 +16,6 @@ interface PatternState {
   getPlacement: (surfaceId: string) => SurfacePatternPlacement | null
   applyPattern: (surface: SelectedSurface, patternId: PatternId) => void
   updateSettings: (surfaceId: string, patch: Partial<SurfacePatternSettings>) => void
-  syncSurfacePlane: (surface: SelectedSurface) => void
   resetSurface: (surfaceId: string) => void
   clearAll: () => void
 }
@@ -26,20 +24,6 @@ function surfaceKey(surface: SelectedSurface): string {
   // Part selections use faceIndex -1 so the whole mesh maps to one placement key.
   const faceIndex = surface.selectionType === 'part' ? -1 : surface.faceIndex
   return getSurfaceId(surface.meshUuid, faceIndex)
-}
-
-function buildPlacement(surface: SelectedSurface): Omit<SurfacePatternPlacement, 'settings'> {
-  const planes = buildSurfacePlanesFromHighlight(
-    surface.highlightGeometry,
-    surface.normal,
-    surface.point,
-  )
-
-  return {
-    surfaceId: surfaceKey(surface),
-    label: getSurfaceLabel(surface.meshName, surface.faceIndex),
-    planes,
-  }
 }
 
 export const usePatternStore = create<PatternState>((set, get) => ({
@@ -54,8 +38,9 @@ export const usePatternStore = create<PatternState>((set, get) => ({
   applyPattern: (surface, patternId) => {
     if (!surface.highlightGeometry?.getAttribute('position')) return
 
-    const base = buildPlacement(surface)
-    const existing = get().placements[base.surfaceId]
+    const surfaceId = surfaceKey(surface)
+    const label = getSurfaceLabel(surface.meshName, surface.faceIndex)
+    const existing = get().placements[surfaceId]
     const definition = getPatternDefinition(patternId)
     const settings: SurfacePatternSettings = existing?.settings
       ? { ...existing.settings, patternId }
@@ -69,7 +54,7 @@ export const usePatternStore = create<PatternState>((set, get) => ({
     set({
       placements: {
         ...get().placements,
-        [base.surfaceId]: { ...base, settings },
+        [surfaceId]: { surfaceId, label, settings },
       },
     })
   },
@@ -84,24 +69,6 @@ export const usePatternStore = create<PatternState>((set, get) => ({
         [surfaceId]: {
           ...current,
           settings: { ...current.settings, ...patch },
-        },
-      },
-    })
-  },
-
-  syncSurfacePlane: (surface) => {
-    const surfaceId = surfaceKey(surface)
-    const current = get().placements[surfaceId]
-    if (!current?.settings.patternId) return
-
-    const base = buildPlacement(surface)
-    set({
-      placements: {
-        ...get().placements,
-        [surfaceId]: {
-          ...current,
-          label: base.label,
-          planes: base.planes,
         },
       },
     })

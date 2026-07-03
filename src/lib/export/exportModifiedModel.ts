@@ -4,6 +4,7 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
 import type { Mesh, Object3D } from 'three'
 import type { ExportFormat } from '../../types/bake'
 import { downloadBlob } from './downloadBlob'
+import { export3mf } from './export3mf'
 import { disposeExportCloneGeometries } from '../three/scheduleDispose'
 
 function sanitizeFileName(name: string): string {
@@ -95,6 +96,14 @@ export async function exportModifiedModel(params: {
       case 'obj': {
         const text = exportObj(exportRoot)
         downloadBlob(text, defaultFileName(baseName, 'obj'), 'text/plain')
+        break
+      }
+      case '3mf': {
+        const zip = export3mf(exportRoot)
+        const blob = new Blob([zip as BlobPart], {
+          type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml',
+        })
+        downloadBlob(blob, defaultFileName(baseName, '3mf'), blob.type)
         break
       }
       default: {
