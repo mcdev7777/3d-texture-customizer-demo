@@ -106,7 +106,10 @@ export function ViewerCanvas() {
     <div className="viewer-shell relative flex-1 min-h-[280px] w-full rounded-xl overflow-hidden border border-purple-500/15 panel-glow">
       {webglOk ? (
         <div className="viewer-canvas-host">
-          <ViewerErrorBoundary fallback={<ViewerErrorFallback />}>
+          <ViewerErrorBoundary
+            resetKey={loadedModel?.object.uuid ?? 'empty'}
+            fallback={<ViewerErrorFallback />}
+          >
             <Canvas
               dpr={[1, Math.min(window.devicePixelRatio, 2)]}
               gl={{

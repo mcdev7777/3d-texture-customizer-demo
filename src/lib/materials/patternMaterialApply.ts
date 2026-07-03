@@ -2,6 +2,10 @@ import {
   BufferGeometry,
   Material,
   Mesh,
+  MeshBasicMaterial,
+  MeshPhongMaterial,
+  MeshPhysicalMaterial,
+  MeshStandardMaterial,
   ShaderMaterial,
   Vector3,
   type Object3D,
@@ -13,6 +17,7 @@ import {
   createPatternShaderMaterial,
 } from './patternShaderMaterial'
 import { extractBaseColor } from './extractBaseColor'
+import { ensureIndexedGeometry, isGeometryPatternReady } from '../geometry/ensureIndexedGeometry'
 
 const PREVIEW_SURFACE_ID = '__preview__'
 
@@ -35,16 +40,26 @@ interface MeshPatternState {
 const meshStates = new Map<string, MeshPatternState>()
 
 function cloneMaterial(material: Material): Material {
-  return material.clone()
+  try {
+    return material.clone()
+  } catch {
+    return new MeshStandardMaterial({ color: extractBaseColor(material) })
+  }
 }
 
 function cloneMaterials(material: Material | Material[]): Material | Material[] {
-  return Array.isArray(material) ? material.map(cloneMaterial) : cloneMaterial(material)
+  if (Array.isArray(material)) {
+    return material.map((mat) => (mat ? cloneMaterial(mat) : new MeshStandardMaterial()))
+  }
+  return material ? cloneMaterial(material) : new MeshStandardMaterial()
 }
 
 function ensureMeshState(mesh: Mesh): MeshPatternState {
   let state = meshStates.get(mesh.uuid)
   if (!state) {
+    if (!isGeometryPatternReady(mesh.geometry)) {
+      throw new Error('Selected mesh has no usable triangle geometry.')
+    }
     state = {
       pristineGeometry: mesh.geometry.clone(),
       pristineMaterial: cloneMaterials(mesh.material),
@@ -66,14 +81,12 @@ function getAllTriangleIndices(geometry: BufferGeometry): number[] {
   return Array.from({ length: count }, (_, i) => i)
 }
 
-function ensureIndexed(geometry: BufferGeometry): BufferGeometry {
-  if (geometry.index) return geometry
-  return geometry.toNonIndexed()
-}
-
 function getOriginalMaterial(state: MeshPatternState): Material {
   const mat = state.pristineMaterial
-  return Array.isArray(mat) ? mat[0] : mat
+  if (Array.isArray(mat)) {
+    return mat.find(Boolean) ?? new MeshStandardMaterial()
+  }
+  return mat ?? new MeshStandardMaterial()
 }
 
 function createRegionMaterial(
@@ -92,8 +105,13 @@ function createRegionMaterial(
 
 function rebuildMesh(mesh: Mesh, regions: PatternRegion[]): void {
   const state = ensureMeshState(mesh)
-  const indexed = ensureIndexed(state.pristineGeometry.clone())
-  const indexAttr = indexed.index!
+  const indexed = ensureIndexedGeometry(state.pristineGeometry)
+  const indexAttr = indexed.index
+  if (!indexAttr) {
+    indexed.dispose()
+    throw new Error('Could not prepare mesh geometry for texturing.')
+  }
+
   const triangleCount = indexAttr.count / 3
 
   const slotForTriangle = new Int32Array(triangleCount).fill(0)

@@ -1,10 +1,12 @@
-import { Color, type Material, MeshStandardMaterial, MeshPhongMaterial, MeshBasicMaterial } from 'three'
+import { Color, type Material, MeshStandardMaterial, MeshPhongMaterial, MeshBasicMaterial, MeshPhysicalMaterial, MeshLambertMaterial } from 'three'
 
 /** Read the diffuse/base color from a mesh material, with a viewer fallback. */
 export function extractBaseColor(material: Material): Color {
   if (
     material instanceof MeshStandardMaterial ||
+    material instanceof MeshPhysicalMaterial ||
     material instanceof MeshPhongMaterial ||
+    material instanceof MeshLambertMaterial ||
     material instanceof MeshBasicMaterial
   ) {
     return material.color.clone()

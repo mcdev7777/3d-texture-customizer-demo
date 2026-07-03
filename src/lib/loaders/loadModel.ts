@@ -1,6 +1,11 @@
 import {
   BufferGeometry,
+  Material,
   Mesh,
+  MeshBasicMaterial,
+  MeshLambertMaterial,
+  MeshPhongMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   Object3D,
 } from 'three'
@@ -40,12 +45,25 @@ export function formatFileTypeLabel(fileType: SupportedFileType | null): string 
   return fileType.toUpperCase()
 }
 
+function isViewerCompatibleMaterial(mat: Material): boolean {
+  return (
+    mat instanceof MeshStandardMaterial ||
+    mat instanceof MeshPhysicalMaterial ||
+    mat instanceof MeshPhongMaterial ||
+    mat instanceof MeshLambertMaterial ||
+    mat instanceof MeshBasicMaterial
+  )
+}
+
 function ensureViewerMaterials(object: Object3D, preserveExisting: boolean): void {
   object.traverse((child) => {
     if (!('isMesh' in child) || !(child as Mesh).isMesh) return
     const mesh = child as Mesh
 
-    if (preserveExisting && mesh.material) return
+    if (preserveExisting && mesh.material) {
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      if (materials.every((mat) => mat && isViewerCompatibleMaterial(mat))) return
+    }
 
     if (!mesh.material) {
       mesh.material = VIEWER_MATERIAL.clone()
@@ -54,9 +72,9 @@ function ensureViewerMaterials(object: Object3D, preserveExisting: boolean): voi
 
     if (Array.isArray(mesh.material)) {
       mesh.material = mesh.material.map((mat) =>
-        mat instanceof MeshStandardMaterial ? mat : VIEWER_MATERIAL.clone(),
+        mat && isViewerCompatibleMaterial(mat) ? mat : VIEWER_MATERIAL.clone(),
       )
-    } else if (!(mesh.material instanceof MeshStandardMaterial)) {
+    } else if (!isViewerCompatibleMaterial(mesh.material)) {
       mesh.material = VIEWER_MATERIAL.clone()
     }
   })

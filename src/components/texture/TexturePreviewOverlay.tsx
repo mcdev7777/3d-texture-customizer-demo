@@ -43,9 +43,12 @@ export function TexturePreviewOverlay() {
 
     try {
       applyPreviewPattern(mesh, selectedSurface, settings)
-    } catch {
+    } catch (err) {
       removePreviewPattern(mesh)
       lastMeshRef.current = null
+      const message = err instanceof Error ? err.message : 'Preview failed.'
+      useBakeStore.getState().setPreviewActive(false)
+      useBakeStore.setState({ status: 'error', error: message })
     }
 
     return () => {
