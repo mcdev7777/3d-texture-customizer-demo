@@ -25,8 +25,8 @@ export function ExportModelPanel() {
   return (
     <Panel title="Export Model" id="export-panel">
       <p className="text-[10px] text-slate-500 mb-3">
-        Downloads the model with applied relief baked in. Preview helpers and selection
-        highlights are never included.
+        Downloads the model with applied pattern materials. GLB includes shader materials;
+        STL, OBJ, and 3MF export base geometry only.
       </p>
 
       {hasModel && appliedCount === 0 && (

@@ -329,8 +329,7 @@ const thumbnailCache = new Map<PatternId, string>()
 /**
  * Registry of custom uploaded textures as opaque grayscale height-mask canvases
  * (white = raised). Keyed by custom pattern id. The pattern system reads these
- * the same way it reads built-in canvases, so custom textures drive geometry
- * height only — never material color.
+ * the same way it reads built-in canvases for shader pattern sampling.
  */
 const customCanvasRegistry = new Map<string, HTMLCanvasElement>()
 
@@ -399,8 +398,15 @@ export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasEl
   canvas.height = size
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D unavailable')
-  const drawer = isBuiltinPattern(patternId) ? PATTERN_DRAWERS[patternId] : PATTERN_DRAWERS.grid
-  drawer(ctx, size)
+
+  if (isBuiltinPattern(patternId)) {
+    PATTERN_DRAWERS[patternId](ctx, size)
+    return canvas
+  }
+
+  // Unknown id (e.g. removed custom texture) — neutral flat mask, not a wrong pattern.
+  ctx.fillStyle = '#f5f5f5'
+  ctx.fillRect(0, 0, size, size)
   return canvas
 }
 

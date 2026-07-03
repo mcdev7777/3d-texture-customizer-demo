@@ -112,7 +112,7 @@ export async function exportModifiedModel(params: {
       }
     }
   } finally {
-    // Dispose cloned geometries only — materials/textures are shared with the live baked object.
+    // Dispose cloned geometries only — materials/textures are shared with the live scene.
     disposeExportCloneGeometries(exportRoot)
   }
 }

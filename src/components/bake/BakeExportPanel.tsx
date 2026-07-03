@@ -29,7 +29,7 @@ export function BakeExportPanel() {
 
   const statusText = isBusy
     ? status === 'applying'
-      ? 'Applying geometry…'
+      ? 'Applying texture…'
       : 'Working…'
     : status === 'error'
       ? 'Error'
