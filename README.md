@@ -49,12 +49,12 @@ Models are centered and scaled to fit the workspace on load. A sample model is i
    - *Part* mode selects an entire mesh.
 3. **Choose a texture** from the library (Hex, Grid, Diamond, Honeycomb, Scales, Ribbed,
    Dots, Waves, Zigzag, Brick, Crosshatch, Cracks), or **Load Texture** to upload your own
-   PNG/JPG/WebP height mask (white = base surface color, black = emphasized detail).
+   PNG/JPG/WebP height mask (white = raised, black = groove — both render as the surface color).
 4. **Adjust** scale, depth, rotation, and offset. Switch between **Emboss** and **Engrave**.
 5. **Preview** shows the pattern on the selected area using the same material mapping as
    Apply. Part mode maps all faces; surface mode maps the selected face only.
 6. **Apply texture** commits the pattern material to the mesh. Depth controls bump shadows
-   around black pattern areas. **Reset surface pattern** clears one applied area;
+   and highlights around pattern edges (bumpmesh-style — no albedo change). **Reset surface pattern** clears one applied area;
    **Reset to original** clears everything.
 7. **Export Model** downloads the textured model as STL, OBJ, GLB, or 3MF. GLB includes
    materials; STL, OBJ, and 3MF export base geometry only.

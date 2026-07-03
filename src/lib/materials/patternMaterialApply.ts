@@ -2,11 +2,7 @@ import {
   BufferGeometry,
   Material,
   Mesh,
-  MeshBasicMaterial,
-  MeshPhongMaterial,
-  MeshPhysicalMaterial,
   MeshStandardMaterial,
-  ShaderMaterial,
   Vector3,
   type Object3D,
 } from 'three'
@@ -15,8 +11,9 @@ import type { SelectedSurface, SelectionMode } from '../../types/surfaceSelectio
 import {
   buildPatternMaterialOptions,
   createPatternShaderMaterial,
+  isPatternShaderMaterial,
 } from './patternShaderMaterial'
-import { extractBaseColor } from './extractBaseColor'
+import { extractBaseColor, resolveMeshRegionMaterial } from './extractBaseColor'
 import { ensureIndexedGeometry, isGeometryPatternReady } from '../geometry/ensureIndexedGeometry'
 
 const PREVIEW_SURFACE_ID = '__preview__'
@@ -25,7 +22,6 @@ export interface PatternRegion {
   surfaceId: string
   triangleIndices: readonly number[]
   settings: SurfacePatternSettings
-  baseColorHex: number
   normal: Vector3
   anchor: Vector3
   selectionType: SelectionMode
@@ -93,12 +89,17 @@ function createRegionMaterial(
   mesh: Mesh,
   state: MeshPatternState,
   region: PatternRegion,
-): ShaderMaterial {
+): Material {
+  const baseMaterial = resolveMeshRegionMaterial(
+    state.pristineGeometry,
+    state.pristineMaterial,
+    region.triangleIndices,
+  )
   const options = buildPatternMaterialOptions(
     mesh,
     state.pristineGeometry,
     region,
-    getOriginalMaterial(state),
+    baseMaterial,
   )
   return createPatternShaderMaterial(options)
 }
@@ -185,7 +186,6 @@ function buildRegion(
     surfaceId,
     triangleIndices,
     settings,
-    baseColorHex: extractBaseColor(getOriginalMaterial(state)).getHex(),
     normal: selectedSurface.normal.clone(),
     anchor: selectedSurface.point.clone(),
     selectionType: selectedSurface.selectionType,
@@ -274,6 +274,4 @@ export function uncommitSurfacePattern(modelRoot: Object3D | null, surfaceId: st
   return found
 }
 
-export function isPatternShaderMaterial(material: Material): material is ShaderMaterial {
-  return material instanceof ShaderMaterial && material.userData.isPatternMaterial === true
-}
+export { isPatternShaderMaterial }

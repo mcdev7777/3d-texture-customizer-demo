@@ -30,7 +30,7 @@ export interface SurfacePatternSettings {
   rotation: number
   offsetX: number
   offsetY: number
-  /** Depth level (0.1–3.0). Controls bump emphasis on pattern-black regions. */
+  /** Depth level (0.1–3.0). Controls bump strength (shadow/highlight depth only). */
   depth: number
   opacity: number
 }
