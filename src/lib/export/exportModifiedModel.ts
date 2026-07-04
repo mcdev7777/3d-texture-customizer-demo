@@ -1,10 +1,11 @@
 import { STLExporter } from 'three/addons/exporters/STLExporter.js'
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js'
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
-import type { Mesh, Object3D } from 'three'
+import type { Object3D } from 'three'
 import type { ExportFormat } from '../../types/bake'
 import { downloadBlob } from './downloadBlob'
 import { export3mf } from './export3mf'
+import { buildExportScene } from './buildExportScene'
 import { disposeExportCloneGeometries } from '../three/scheduleDispose'
 
 function sanitizeFileName(name: string): string {
@@ -17,18 +18,7 @@ function defaultFileName(baseName: string, format: ExportFormat): string {
 }
 
 function prepareExportRoot(object: Object3D): Object3D {
-  const clone = object.clone(true)
-  clone.traverse((child) => {
-    if (!('isMesh' in child) || !child.isMesh) return
-    const mesh = child as Mesh
-    if (mesh.userData.isPreview || mesh.userData.isHelper) {
-      mesh.visible = false
-    }
-    if (mesh.geometry) {
-      mesh.geometry = mesh.geometry.clone()
-    }
-  })
-  return clone
+  return buildExportScene(object)
 }
 
 async function exportGlb(object: Object3D): Promise<ArrayBuffer> {

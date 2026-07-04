@@ -58,7 +58,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
         return false
       }
 
-      commitPatternMaterial(sourceMesh, selected, entry.settings)
+      commitPatternMaterial(sourceMesh, loadedModel.object, selected, entry.settings)
 
       const committedSurfaceIds = get().committedSurfaceIds.includes(selected.surfaceId)
         ? get().committedSurfaceIds

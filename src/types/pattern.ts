@@ -30,9 +30,13 @@ export interface SurfacePatternSettings {
   rotation: number
   offsetX: number
   offsetY: number
-  /** Depth level (0.1–3.0). Controls bump strength (shadow/highlight depth only). */
+  /** Depth (0–2). 0 = flat; higher = stronger relief and shadow. */
   depth: number
   opacity: number
+  /** 0–1 edge softening for height sampling. */
+  smoothing: number
+  invert: boolean
+  symmetric: boolean
 }
 
 export const DEFAULT_PATTERN_SETTINGS: SurfacePatternSettings = {
@@ -44,10 +48,13 @@ export const DEFAULT_PATTERN_SETTINGS: SurfacePatternSettings = {
   offsetY: 0,
   depth: 1,
   opacity: 1,
+  smoothing: 0,
+  invert: false,
+  symmetric: false,
 }
 
-export const DEPTH_MIN = 0.1
-export const DEPTH_MAX = 3
+export const DEPTH_MIN = 0
+export const DEPTH_MAX = 2
 export const DEPTH_DEFAULT = 1
 export const SCALE_MIN = 0.25
 export const SCALE_MAX = 5
