@@ -1,5 +1,6 @@
 import {
   BufferGeometry,
+  DoubleSide,
   Float32BufferAttribute,
   Matrix4,
   Vector3,
@@ -17,8 +18,7 @@ import {
 } from '../textures/patternPlacementMath'
 import { getPatternImageData } from '../../utils/patternTextures'
 import { hasProceduralEvaluator } from '../textures/patternEvaluators'
-import { buildTextureTargets, type TextureTarget } from './textureTargets'
-import type { SurfaceProjection } from './surfaceProjection'
+import { buildTextureTargets } from './textureTargets'
 
 export interface BakeQuality {
   samplesPerTile: number
@@ -43,10 +43,34 @@ export const COMMITTED_QUALITY: BakeQuality = {
 
 const pristineGeometries = new Map<string, BufferGeometry>()
 const prePreviewGeometries = new Map<string, BufferGeometry>()
+const originalMaterialSides = new Map<string, number>()
 
 export function storePristine(mesh: Mesh): void {
   if (!pristineGeometries.has(mesh.uuid)) {
     pristineGeometries.set(mesh.uuid, mesh.geometry.clone())
+  }
+}
+
+function enableDoubleSide(mesh: Mesh): void {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+  for (const mat of materials) {
+    if (!originalMaterialSides.has(mat.uuid)) {
+      originalMaterialSides.set(mat.uuid, mat.side)
+    }
+    mat.side = DoubleSide
+    mat.needsUpdate = true
+  }
+}
+
+function restoreOriginalSide(mesh: Mesh): void {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+  for (const mat of materials) {
+    const original = originalMaterialSides.get(mat.uuid)
+    if (original !== undefined) {
+      mat.side = original
+      mat.needsUpdate = true
+      originalMaterialSides.delete(mat.uuid)
+    }
   }
 }
 
@@ -64,6 +88,7 @@ export function applyPreviewGeometry(
 
   if (mesh.geometry !== baseGeo) mesh.geometry.dispose()
   mesh.geometry = displaced
+  enableDoubleSide(mesh)
 }
 
 export function removePreviewGeometry(mesh: Mesh): void {
@@ -72,6 +97,7 @@ export function removePreviewGeometry(mesh: Mesh): void {
   if (mesh.geometry !== baseGeo) mesh.geometry.dispose()
   mesh.geometry = baseGeo
   prePreviewGeometries.delete(mesh.uuid)
+  restoreOriginalSide(mesh)
 }
 
 export function commitGeometry(
@@ -97,6 +123,7 @@ export function commitGeometry(
   }
 
   mesh.geometry = displaced
+  enableDoubleSide(mesh)
 }
 
 export function resetAllGeometries(modelRoot: Object3D | null): void {
@@ -109,10 +136,12 @@ export function resetAllGeometries(modelRoot: Object3D | null): void {
         if (mesh.geometry !== pristine) mesh.geometry.dispose()
         mesh.geometry = pristine
       }
+      restoreOriginalSide(mesh)
     })
   }
   pristineGeometries.clear()
   prePreviewGeometries.clear()
+  originalMaterialSides.clear()
 }
 
 export function hasActivePreview(meshUuid: string): boolean {
@@ -120,64 +149,33 @@ export function hasActivePreview(meshUuid: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Subdivision + displacement (adapted from reliefPatch.ts, no BASE_OFFSET)
+// Subdivision (tessellation only, no displacement)
 // ---------------------------------------------------------------------------
 
-interface DisplaceContext {
-  origin: Vector3
-  tangent: Vector3
-  bitangent: Vector3
-  dir: Vector3
-  settings: SurfacePatternSettings
-  depthWorld: number
-  imageData: ImageData | null
-}
-
-const _p = new Vector3()
-
-function displaceVertex(
-  x: number,
-  y: number,
-  z: number,
-  ctx: DisplaceContext,
-  out: number[],
-): void {
-  _p.set(x - ctx.origin.x, y - ctx.origin.y, z - ctx.origin.z)
-  const uWorld = _p.dot(ctx.tangent)
-  const vWorld = _p.dot(ctx.bitangent)
-  const mask = sampleReliefHeight(
-    ctx.settings.patternId as string,
-    uWorld,
-    vWorld,
-    ctx.settings,
-    ctx.imageData,
-  )
-  const disp = getReliefDisplacement(mask, ctx.settings.mode, ctx.depthWorld)
-  out.push(x + ctx.dir.x * disp, y + ctx.dir.y * disp, z + ctx.dir.z * disp)
-}
-
-function subdivide(
+/**
+ * Recursively 4-split a triangle to the requested level, outputting
+ * un-displaced vertex positions. Displacement happens in a second pass
+ * so that smooth per-vertex normals can be computed across island boundaries.
+ */
+function subdivideFlat(
   ax: number, ay: number, az: number,
   bx: number, by: number, bz: number,
   cx: number, cy: number, cz: number,
   level: number,
-  ctx: DisplaceContext,
   out: number[],
 ): void {
   if (level <= 0) {
-    displaceVertex(ax, ay, az, ctx, out)
-    displaceVertex(bx, by, bz, ctx, out)
-    displaceVertex(cx, cy, cz, ctx, out)
+    out.push(ax, ay, az, bx, by, bz, cx, cy, cz)
     return
   }
   const abx = (ax + bx) / 2, aby = (ay + by) / 2, abz = (az + bz) / 2
   const bcx = (bx + cx) / 2, bcy = (by + cy) / 2, bcz = (bz + cz) / 2
   const cax = (cx + ax) / 2, cay = (cy + ay) / 2, caz = (cz + az) / 2
   const n = level - 1
-  subdivide(ax, ay, az, abx, aby, abz, cax, cay, caz, n, ctx, out)
-  subdivide(abx, aby, abz, bx, by, bz, bcx, bcy, bcz, n, ctx, out)
-  subdivide(cax, cay, caz, bcx, bcy, bcz, cx, cy, cz, n, ctx, out)
-  subdivide(abx, aby, abz, bcx, bcy, bcz, cax, cay, caz, n, ctx, out)
+  subdivideFlat(ax, ay, az, abx, aby, abz, cax, cay, caz, n, out)
+  subdivideFlat(abx, aby, abz, bx, by, bz, bcx, bcy, bcz, n, out)
+  subdivideFlat(cax, cay, caz, bcx, bcy, bcz, cx, cy, cz, n, out)
+  subdivideFlat(abx, aby, abz, bcx, bcy, bcz, cax, cay, caz, n, out)
 }
 
 function edgeLength(t: number[], i: number, j: number): number {
@@ -226,56 +224,13 @@ function computeSubdivisionLevels(
   return levels
 }
 
-function subdivideTarget(
-  target: TextureTarget,
-  settings: SurfacePatternSettings,
-  imageData: ImageData | null,
-  quality: BakeQuality,
-  out: number[],
-): void {
-  const projection: SurfaceProjection = target.projection
-  const tileWorld = BASE_TILE_WORLD / Math.max(0.05, settings.scale)
-  const spacing = tileWorld / quality.samplesPerTile
-
-  const levels = computeSubdivisionLevels(target.triangles, spacing, quality)
-
-  const ctx: DisplaceContext = {
-    origin: projection.originWorld,
-    tangent: projection.tangentWorld,
-    bitangent: projection.bitangentWorld,
-    dir: projection.normalWorld,
-    settings,
-    depthWorld: depthLevelToWorld(settings.depth),
-    imageData,
-  }
-
-  const triCount = target.triangles.length / 9
-  for (let t = 0; t < triCount; t++) {
-    const o = t * 9
-    const tri = target.triangles
-    subdivide(
-      tri[o], tri[o + 1], tri[o + 2],
-      tri[o + 3], tri[o + 4], tri[o + 5],
-      tri[o + 6], tri[o + 7], tri[o + 8],
-      levels[t],
-      ctx,
-      out,
-    )
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Core bake function
+// Core bake function — two-pass: subdivide then displace with smooth normals
 // ---------------------------------------------------------------------------
 
 const _v = new Vector3()
+const _p = new Vector3()
 
-/**
- * Bake displacement into a mesh geometry in-place. Takes a base geometry
- * (the geometry before this bake), extracts the selected faces, subdivides
- * and displaces them in world space, transforms back to local space, and
- * merges with non-selected faces into a new BufferGeometry.
- */
 export function bakeDisplacement(
   mesh: Mesh,
   baseGeometry: BufferGeometry,
@@ -318,6 +273,7 @@ export function bakeDisplacement(
 
   if (isIndexed) nonIndexed.dispose()
 
+  // Build texture targets (islands) for UV mapping projections
   const worldSelectedGeo = new BufferGeometry()
   worldSelectedGeo.setAttribute(
     'position',
@@ -335,12 +291,89 @@ export function bakeDisplacement(
 
   const patternId = settings.patternId as string
   const imageData = hasProceduralEvaluator(patternId) ? null : getPatternImageData(patternId)
+  const depthWorld = depthLevelToWorld(settings.depth)
 
-  const worldDisplacedPositions: number[] = []
+  // ---- Pass 1: Subdivide each target WITHOUT displacement ----
+  const perTargetPositions: number[][] = []
   for (const target of targets) {
-    subdivideTarget(target, settings, imageData, quality, worldDisplacedPositions)
+    const tileWorld = BASE_TILE_WORLD / Math.max(0.05, settings.scale)
+    const spacing = tileWorld / quality.samplesPerTile
+    const levels = computeSubdivisionLevels(target.triangles, spacing, quality)
+
+    const subPos: number[] = []
+    const triCount = target.triangles.length / 9
+    for (let t = 0; t < triCount; t++) {
+      const o = t * 9
+      const tri = target.triangles
+      subdivideFlat(
+        tri[o], tri[o + 1], tri[o + 2],
+        tri[o + 3], tri[o + 4], tri[o + 5],
+        tri[o + 6], tri[o + 7], tri[o + 8],
+        levels[t], subPos,
+      )
+    }
+    perTargetPositions.push(subPos)
   }
 
+  // Combine all subdivided (un-displaced) positions
+  let totalSubFloats = 0
+  for (const sub of perTargetPositions) totalSubFloats += sub.length
+  const combinedPositions = new Float32Array(totalSubFloats)
+  let writeOffset = 0
+  for (const sub of perTargetPositions) {
+    for (let i = 0; i < sub.length; i++) {
+      combinedPositions[writeOffset++] = sub[i]
+    }
+  }
+
+  // ---- Compute smooth per-vertex normals via merge + computeVertexNormals ----
+  // Merging shares vertices at island boundaries so smooth normals blend
+  // across edges instead of each island displacing in its own direction.
+  const subGeo = new BufferGeometry()
+  subGeo.setAttribute('position', new Float32BufferAttribute(combinedPositions, 3))
+  const mergedSub = mergeVertices(subGeo, 1e-4)
+  subGeo.dispose()
+  mergedSub.computeVertexNormals()
+
+  const mergedNor = mergedSub.getAttribute('normal')
+  const mergedIdx = mergedSub.getIndex()!
+
+  // ---- Pass 2: Displace each vertex using smooth normal + target projection ----
+  const worldDisplacedPositions: number[] = []
+  let globalVertIdx = 0
+
+  for (let ti = 0; ti < targets.length; ti++) {
+    const sub = perTargetPositions[ti]
+    const projection = targets[ti].projection
+    const vertCount = sub.length / 3
+
+    for (let vi = 0; vi < vertCount; vi++) {
+      const x = sub[vi * 3], y = sub[vi * 3 + 1], z = sub[vi * 3 + 2]
+
+      // UV mapping uses the per-island projection (correct per-face)
+      _p.set(
+        x - projection.originWorld.x,
+        y - projection.originWorld.y,
+        z - projection.originWorld.z,
+      )
+      const uWorld = _p.dot(projection.tangentWorld)
+      const vWorld = _p.dot(projection.bitangentWorld)
+
+      const mask = sampleReliefHeight(patternId, uWorld, vWorld, settings, imageData)
+      const disp = getReliefDisplacement(mask, settings.mode, depthWorld)
+
+      // Displacement direction uses the smooth normal (shared at boundaries)
+      const mi = mergedIdx.getX(globalVertIdx)
+      const nx = mergedNor.getX(mi), ny = mergedNor.getY(mi), nz = mergedNor.getZ(mi)
+
+      worldDisplacedPositions.push(x + nx * disp, y + ny * disp, z + nz * disp)
+      globalVertIdx++
+    }
+  }
+
+  mergedSub.dispose()
+
+  // Transform displaced world positions back to local space
   const localDisplacedPositions: number[] = []
   for (let i = 0; i < worldDisplacedPositions.length; i += 3) {
     _v.set(
@@ -352,6 +385,7 @@ export function bakeDisplacement(
     localDisplacedPositions.push(_v.x, _v.y, _v.z)
   }
 
+  // Merge non-selected (unchanged) + displaced positions
   const totalFloats = localNonSelectedPositions.length + localDisplacedPositions.length
   const finalPositions = new Float32Array(totalFloats)
   for (let i = 0; i < localNonSelectedPositions.length; i++) {
