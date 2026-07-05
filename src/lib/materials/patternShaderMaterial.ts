@@ -11,13 +11,16 @@ import {
   Vector3,
   type Material,
   type Mesh,
+  type Object3D,
   type Texture,
   type WebGLProgramParametersWithUniforms,
 } from 'three'
 import type { SelectionMode } from '../../types/surfaceSelection'
 import type { SurfacePatternSettings } from '../../types/pattern'
+import { DEPTH_MAX } from '../../types/pattern'
 import { createSurfaceProjectionFromHighlight, type SurfaceProjection } from '../geometry/surfaceProjection'
-import { BASE_TILE_WORLD, depthLevelToWorld } from '../textures/patternPlacementMath'
+import { BASE_TILE_WORLD } from '../textures/patternPlacementMath'
+import { depthLevelToDisplacementWorld, getModelMaxDimension } from '../pattern/patternDepth'
 import { getPatternTexture, getPatternTextureAspect } from './patternTexture'
 import { computePatternBounds, type PatternBounds } from './patternBounds'
 
@@ -43,7 +46,8 @@ uniform float patternTileWorld;
 uniform float patternRotationRad;
 uniform vec2 patternOffsetUV;
 uniform vec2 patternTextureAspect;
-uniform float patternBumpStrength;
+uniform float patternAmplitude;
+uniform int patternInvert;
 uniform int patternEngraveMode;
 uniform int patternMappingMode;
 uniform vec3 patternBoundsMin;
@@ -120,7 +124,8 @@ const PATTERN_BUMP_INJECT = /* glsl */ `
 {
   vec3 patternProjN = patternFaceNormal(vPatternWorldPos);
   float patternRawH = patternHeightAt(vPatternWorldPos, patternProjN);
-  float h = smoothstep(0.08, 0.92, patternRawH);
+  float h = patternRawH;
+  if (patternInvert == 1) h = 1.0 - h;
   float heightField = patternEngraveMode == 1 ? (1.0 - h) : h;
 
   float dhx = dFdx(heightField);
@@ -133,8 +138,8 @@ const PATTERN_BUMP_INJECT = /* glsl */ `
   T /= max(length(T), 1e-5);
   B /= max(length(B), 1e-5);
   float posScale = max(length(dp1) + length(dp2), 1e-6);
-  float bumpScale = patternBumpStrength * 55.0 / posScale;
-  vec3 bumpNormal = normal - bumpScale * (dhx * T + dhy * B);
+  float bumpStr = patternAmplitude * 6.0 / posScale;
+  vec3 bumpNormal = normal - bumpStr * (dhx * T + dhy * B);
   normal = normalize(bumpNormal);
 }
 `
@@ -144,6 +149,7 @@ export interface PatternMaterialOptions {
   projection: SurfaceProjection
   baseMaterial: Material
   sourceGeometry: BufferGeometry
+  modelRoot: Object3D
   patternTexture?: Texture
   mappingMode: SelectionMode
   bounds?: PatternBounds
@@ -182,12 +188,14 @@ function ensureVertexColors(material: Material, geometry: BufferGeometry): void 
 }
 
 function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
-  const { settings, projection, mappingMode, bounds } = options
+  const { settings, projection, mappingMode, bounds, modelRoot } = options
   const patternId = settings.patternId
   if (!patternId) throw new Error('Pattern id is required.')
 
   const tileWorld = BASE_TILE_WORLD / Math.max(0.05, settings.scale)
   const aspect = getPatternTextureAspect(patternId)
+  const modelMaxDim = getModelMaxDimension(modelRoot)
+  const amplitude = depthLevelToDisplacementWorld(settings.depth, modelMaxDim)
   const b = bounds ?? {
     min: new Vector3(),
     max: new Vector3(1, 1, 1),
@@ -204,12 +212,29 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
     patternRotationRad: { value: (settings.rotation * Math.PI) / 180 },
     patternOffsetUV: { value: new Vector2(settings.offsetX, settings.offsetY) },
     patternTextureAspect: { value: new Vector2(aspect.u, aspect.v) },
-    patternBumpStrength: { value: depthLevelToWorld(settings.depth) },
+    patternAmplitude: { value: amplitude },
+    patternInvert: { value: settings.invert ? 1 : 0 },
     patternEngraveMode: { value: settings.mode === 'engrave' ? 1 : 0 },
     patternMappingMode: { value: mappingMode === 'part' ? MAPPING_CUBIC : MAPPING_PLANAR },
     patternBoundsMin: { value: b.min.clone() },
     patternBoundsSize: { value: b.size.clone() },
   }
+}
+
+function patternProgramCacheKey(options: PatternMaterialOptions): string {
+  const { settings, mappingMode } = options
+  return `pattern:v5:${mappingMode}:${settings.mode}:${settings.patternId ?? 'none'}:${settings.depth.toFixed(2)}:${settings.scale.toFixed(2)}:${settings.rotation.toFixed(0)}:${settings.invert ? 1 : 0}`
+}
+
+function applyDepthMaterialFeel(material: Material, depth: number): void {
+  if (
+    !(material instanceof MeshStandardMaterial || material instanceof MeshPhysicalMaterial)
+  ) {
+    return
+  }
+  const t = Math.min(1, Math.max(0, depth / DEPTH_MAX))
+  material.roughness = 0.56 - t * 0.2
+  material.metalness = 0.12 + t * 0.06
 }
 
 function injectPatternShader(
@@ -245,8 +270,8 @@ function attachPatternHooks(material: Material, options: PatternMaterialOptions)
   const uniforms = buildUniforms(options)
   material.userData.patternUniforms = uniforms
   material.side = DoubleSide
-  material.customProgramCacheKey = () =>
-    `pattern:v3:${options.mappingMode}:${options.settings.mode}:${options.settings.patternId ?? 'none'}`
+  material.customProgramCacheKey = () => patternProgramCacheKey(options)
+  applyDepthMaterialFeel(material, options.settings.depth)
 
   material.onBeforeCompile = (shader) => {
     injectPatternShader(shader, material.userData.patternUniforms as PatternUniformBag)
@@ -295,6 +320,47 @@ export function updatePatternShaderMaterial(material: Material, options: Pattern
     else if (uniform.value instanceof Vector2) (target.value as Vector2).copy(uniform.value as Vector2)
     else target.value = uniform.value
   }
+
+  material.customProgramCacheKey = () => patternProgramCacheKey(options)
+  applyDepthMaterialFeel(material, options.settings.depth)
+  material.needsUpdate = true
+}
+
+export function buildPatternMaterialOptions(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  stateGeometry: BufferGeometry,
+  region: {
+    settings: SurfacePatternSettings
+    normal: Vector3
+    anchor: Vector3
+    triangleIndices: readonly number[]
+    selectionType: SelectionMode
+  },
+  baseMaterial: Material,
+): PatternMaterialOptions {
+  const projection = buildProjectionForMesh(
+    mesh,
+    region.normal,
+    region.anchor,
+    region.triangleIndices,
+    stateGeometry,
+  )
+
+  const bounds =
+    region.selectionType === 'part'
+      ? computePatternBounds(mesh, stateGeometry, region.triangleIndices)
+      : undefined
+
+  return {
+    settings: region.settings,
+    projection,
+    baseMaterial,
+    sourceGeometry: stateGeometry,
+    modelRoot,
+    mappingMode: region.selectionType,
+    bounds,
+  }
 }
 
 export function buildProjectionForMesh(
@@ -328,41 +394,6 @@ export function buildProjectionForMesh(
   const projection = createSurfaceProjectionFromHighlight(highlight, worldNormal, fallbackCenter)
   highlight.dispose()
   return projection
-}
-
-export function buildPatternMaterialOptions(
-  mesh: Mesh,
-  stateGeometry: BufferGeometry,
-  region: {
-    settings: SurfacePatternSettings
-    normal: Vector3
-    anchor: Vector3
-    triangleIndices: readonly number[]
-    selectionType: SelectionMode
-  },
-  baseMaterial: Material,
-): PatternMaterialOptions {
-  const projection = buildProjectionForMesh(
-    mesh,
-    region.normal,
-    region.anchor,
-    region.triangleIndices,
-    stateGeometry,
-  )
-
-  const bounds =
-    region.selectionType === 'part'
-      ? computePatternBounds(mesh, stateGeometry, region.triangleIndices)
-      : undefined
-
-  return {
-    settings: region.settings,
-    projection,
-    baseMaterial,
-    sourceGeometry: stateGeometry,
-    mappingMode: region.selectionType,
-    bounds,
-  }
 }
 
 export function isPatternShaderMaterial(material: Material): material is Material {

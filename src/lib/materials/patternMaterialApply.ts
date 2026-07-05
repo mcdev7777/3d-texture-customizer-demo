@@ -15,6 +15,13 @@ import {
 } from './patternShaderMaterial'
 import { extractBaseColor, resolveMeshRegionMaterial } from './extractBaseColor'
 import { ensureIndexedGeometry, isGeometryPatternReady } from '../geometry/ensureIndexedGeometry'
+import {
+  bakeReliefIntoGeometry,
+  createBakeContext,
+} from '../geometry/bakeReliefDisplacement'
+import { getConnectedCoplanarSurface } from '../surface/getConnectedCoplanarSurface'
+import { getFacesByAngle } from '../surface/selectByAngle'
+import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 
 const PREVIEW_SURFACE_ID = '__preview__'
 
@@ -57,7 +64,7 @@ function ensureMeshState(mesh: Mesh): MeshPatternState {
       throw new Error('Selected mesh has no usable triangle geometry.')
     }
     state = {
-      pristineGeometry: mesh.geometry.clone(),
+      pristineGeometry: ensureIndexedGeometry(mesh.geometry.clone()),
       pristineMaterial: cloneMaterials(mesh.material),
       regions: [],
     }
@@ -73,8 +80,7 @@ function getTriangleCount(geometry: BufferGeometry): number {
 }
 
 function getAllTriangleIndices(geometry: BufferGeometry): number[] {
-  const count = getTriangleCount(geometry)
-  return Array.from({ length: count }, (_, i) => i)
+  return Array.from({ length: getTriangleCount(geometry) }, (_, i) => i)
 }
 
 function getOriginalMaterial(state: MeshPatternState): Material {
@@ -87,6 +93,7 @@ function getOriginalMaterial(state: MeshPatternState): Material {
 
 function createRegionMaterial(
   mesh: Mesh,
+  modelRoot: Object3D,
   state: MeshPatternState,
   region: PatternRegion,
 ): Material {
@@ -95,30 +102,62 @@ function createRegionMaterial(
     state.pristineMaterial,
     region.triangleIndices,
   )
-  const options = buildPatternMaterialOptions(
-    mesh,
-    state.pristineGeometry,
-    region,
-    baseMaterial,
+  return createPatternShaderMaterial(
+    buildPatternMaterialOptions(mesh, modelRoot, state.pristineGeometry, region, baseMaterial),
   )
-  return createPatternShaderMaterial(options)
 }
 
-function rebuildMesh(mesh: Mesh, regions: PatternRegion[]): void {
-  const state = ensureMeshState(mesh)
-  const indexed = ensureIndexedGeometry(state.pristineGeometry)
-  const indexAttr = indexed.index
-  if (!indexAttr) {
-    indexed.dispose()
-    throw new Error('Could not prepare mesh geometry for texturing.')
+function bakeCommittedIntoGeometry(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  geometry: BufferGeometry,
+  state: MeshPatternState,
+  committed: PatternRegion[],
+): BufferGeometry {
+  if (committed.length === 0) return geometry
+
+  let geo = geometry
+  let { pristineTriMap, pristineWorldBuffer } = createBakeContext(mesh, state.pristineGeometry)
+
+  for (const region of committed) {
+    if (!region.settings.patternId) continue
+    const baked = bakeReliefIntoGeometry({
+      mesh,
+      modelRoot,
+      geometry: geo,
+      pristineGeometry: state.pristineGeometry,
+      region,
+      quality: 'apply',
+      pristineTriMap,
+      pristineWorldBuffer,
+    })
+    geo = baked.geometry
+    pristineTriMap = baked.pristineTriMap
+    pristineWorldBuffer = baked.pristineWorldBuffer
   }
 
-  const triangleCount = indexAttr.count / 3
+  geo.deleteAttribute('pristineWorld')
+  geo.computeBoundingBox()
+  geo.computeBoundingSphere()
+  return geo
+}
 
+function applyShaderRegions(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  state: MeshPatternState,
+  geometry: BufferGeometry,
+  shaderRegions: PatternRegion[],
+): void {
+  const indexAttr = geometry.index
+  if (!indexAttr) throw new Error('Could not prepare mesh geometry for texturing.')
+
+  const triangleCount = indexAttr.count / 3
   const slotForTriangle = new Int32Array(triangleCount).fill(0)
-  for (let ri = 0; ri < regions.length; ri++) {
+
+  for (let ri = 0; ri < shaderRegions.length; ri++) {
     const slot = ri + 1
-    for (const t of regions[ri].triangleIndices) {
+    for (const t of shaderRegions[ri].triangleIndices) {
       if (t >= 0 && t < triangleCount) slotForTriangle[t] = slot
     }
   }
@@ -126,8 +165,7 @@ function rebuildMesh(mesh: Mesh, regions: PatternRegion[]): void {
   const materials: Material[] = [cloneMaterial(getOriginalMaterial(state))]
   const newIndices: number[] = []
   const groups: { start: number; count: number; materialIndex: number }[] = []
-
-  const slotOrder = [0, ...regions.map((_, i) => i + 1)]
+  const slotOrder = [0, ...shaderRegions.map((_, i) => i + 1)]
 
   for (const slot of slotOrder) {
     const start = newIndices.length
@@ -145,18 +183,16 @@ function rebuildMesh(mesh: Mesh, regions: PatternRegion[]): void {
     let materialIndex = 0
     if (slot > 0) {
       materialIndex = materials.length
-      materials.push(createRegionMaterial(mesh, state, regions[slot - 1]))
+      materials.push(createRegionMaterial(mesh, modelRoot, state, shaderRegions[slot - 1]!))
     }
-
     groups.push({ start, count, materialIndex })
   }
 
-  const rebuilt = indexed.clone()
+  const rebuilt = geometry.clone()
   rebuilt.setIndex(newIndices)
   rebuilt.clearGroups()
   for (const group of groups) rebuilt.addGroup(group.start, group.count, group.materialIndex)
   rebuilt.computeVertexNormals()
-  indexed.dispose()
 
   const oldGeo = mesh.geometry
   if (oldGeo !== state.pristineGeometry) oldGeo.dispose()
@@ -167,7 +203,68 @@ function rebuildMesh(mesh: Mesh, regions: PatternRegion[]): void {
   }
 
   mesh.geometry = rebuilt
-  mesh.material = materials.length === 1 ? materials[0] : materials
+  mesh.material = materials.length === 1 ? materials[0]! : materials
+}
+
+function rebuildMesh(mesh: Mesh, modelRoot: Object3D, regions: PatternRegion[]): void {
+  const state = ensureMeshState(mesh)
+  let geometry = ensureIndexedGeometry(state.pristineGeometry.clone())
+  if (!geometry.index) {
+    geometry.dispose()
+    throw new Error('Could not prepare mesh geometry for texturing.')
+  }
+
+  if (regions.length > 0) {
+    applyShaderRegions(mesh, modelRoot, state, geometry, regions)
+  } else {
+    const oldGeo = mesh.geometry
+    if (oldGeo !== state.pristineGeometry) oldGeo.dispose()
+
+    const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const mat of oldMaterials) {
+      if (mat.userData.isPatternMaterial) mat.dispose()
+    }
+
+    mesh.geometry = geometry
+    mesh.material = cloneMaterials(state.pristineMaterial)
+  }
+}
+
+/** Bake committed pattern relief into geometry for export (not used for viewport). */
+export function bakeCommittedPatternsIntoGeometry(
+  mesh: Mesh,
+  modelRoot: Object3D,
+): BufferGeometry {
+  const state = meshStates.get(mesh.uuid)
+  if (!state) return mesh.geometry.clone()
+
+  const committed = state.regions.filter((r) => r.surfaceId !== PREVIEW_SURFACE_ID)
+  if (committed.length === 0) return mesh.geometry.clone()
+
+  let geometry = ensureIndexedGeometry(state.pristineGeometry.clone())
+  if (!geometry.index) {
+    geometry.dispose()
+    throw new Error('Could not prepare mesh geometry for texturing.')
+  }
+
+  return bakeCommittedIntoGeometry(mesh, modelRoot, geometry, state, committed)
+}
+
+function resolveTriangleIndices(
+  mesh: Mesh,
+  state: MeshPatternState,
+  selectedSurface: SelectedSurface,
+): number[] {
+  const geo = state.pristineGeometry
+  if (selectedSurface.selectionType === 'part') {
+    return getAllTriangleIndices(geo)
+  }
+
+  const { angleTolerance, connectedOnly } = useSurfaceSelectionStore.getState()
+  const faceIndex = selectedSurface.faceIndex
+  return connectedOnly
+    ? getConnectedCoplanarSurface(geo, mesh, faceIndex, angleTolerance)
+    : getFacesByAngle(geo, mesh, faceIndex, angleTolerance)
 }
 
 function buildRegion(
@@ -177,40 +274,54 @@ function buildRegion(
   surfaceId: string,
 ): PatternRegion {
   const state = ensureMeshState(mesh)
-  const triangleIndices =
-    selectedSurface.selectionType === 'part'
-      ? getAllTriangleIndices(state.pristineGeometry)
-      : selectedSurface.triangleIndices
-
   return {
     surfaceId,
-    triangleIndices,
-    settings,
+    triangleIndices: resolveTriangleIndices(mesh, state, selectedSurface),
+    settings: { ...settings },
     normal: selectedSurface.normal.clone(),
     anchor: selectedSurface.point.clone(),
     selectionType: selectedSurface.selectionType,
   }
 }
 
+export function updateCommittedRegionSettings(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  surfaceId: string,
+  settings: SurfacePatternSettings,
+): boolean {
+  const state = meshStates.get(mesh.uuid)
+  if (!state) return false
+
+  const region = state.regions.find((r) => r.surfaceId === surfaceId)
+  if (!region) return false
+
+  region.settings = { ...settings }
+  rebuildMesh(mesh, modelRoot, state.regions)
+  return true
+}
+
 export function applyPreviewPattern(
   mesh: Mesh,
+  modelRoot: Object3D,
   selectedSurface: SelectedSurface,
   settings: SurfacePatternSettings,
 ): void {
   const state = ensureMeshState(mesh)
   const previewRegion = buildRegion(mesh, selectedSurface, settings, PREVIEW_SURFACE_ID)
   const committed = state.regions.filter((r) => r.surfaceId !== PREVIEW_SURFACE_ID)
-  rebuildMesh(mesh, [...committed, previewRegion])
+  rebuildMesh(mesh, modelRoot, [...committed, previewRegion])
 }
 
-export function removePreviewPattern(mesh: Mesh): void {
+export function removePreviewPattern(mesh: Mesh, modelRoot: Object3D): void {
   const state = meshStates.get(mesh.uuid)
   if (!state) return
-  rebuildMesh(mesh, state.regions)
+  rebuildMesh(mesh, modelRoot, state.regions)
 }
 
 export function commitPatternMaterial(
   mesh: Mesh,
+  modelRoot: Object3D,
   selectedSurface: SelectedSurface,
   settings: SurfacePatternSettings,
 ): void {
@@ -218,7 +329,7 @@ export function commitPatternMaterial(
   const region = buildRegion(mesh, selectedSurface, settings, selectedSurface.surfaceId)
   state.regions = state.regions.filter((r) => r.surfaceId !== selectedSurface.surfaceId)
   state.regions.push(region)
-  rebuildMesh(mesh, state.regions)
+  rebuildMesh(mesh, modelRoot, state.regions)
 }
 
 export function resetMeshPatterns(mesh: Mesh): void {
@@ -243,16 +354,12 @@ export function resetAllPatterns(modelRoot: Object3D | null): void {
     return
   }
 
-  const meshes: Mesh[] = []
   modelRoot.traverse((child) => {
-    if ('isMesh' in child && child.isMesh) meshes.push(child as Mesh)
+    if ('isMesh' in child && child.isMesh) resetMeshPatterns(child as Mesh)
   })
-
-  for (const mesh of meshes) resetMeshPatterns(mesh)
   meshStates.clear()
 }
 
-/** Remove one committed pattern region and restore geometry/material if none remain. */
 export function uncommitSurfacePattern(modelRoot: Object3D | null, surfaceId: string): boolean {
   if (!modelRoot) return false
 
@@ -265,11 +372,8 @@ export function uncommitSurfacePattern(modelRoot: Object3D | null, surfaceId: st
 
     found = true
     state.regions = state.regions.filter((r) => r.surfaceId !== surfaceId)
-    if (state.regions.length === 0) {
-      resetMeshPatterns(mesh)
-    } else {
-      rebuildMesh(mesh, state.regions)
-    }
+    if (state.regions.length === 0) resetMeshPatterns(mesh)
+    else rebuildMesh(mesh, modelRoot, state.regions)
   })
   return found
 }

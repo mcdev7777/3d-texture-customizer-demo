@@ -7,13 +7,11 @@ import { useBakeStore } from '../../store/useBakeStore'
 import {
   applyPreviewPattern,
   removePreviewPattern,
+  updateCommittedRegionSettings,
 } from '../../lib/materials/patternMaterialApply'
 import { findMeshByUuid } from '../../lib/surface/restoreSurfaceFromId'
 
-/**
- * Headless component that previews bump-map pattern shading on the selected mesh —
- * the surface keeps its original color everywhere; pattern detail comes from lighting only.
- */
+/** Live bump preview + committed region depth updates. */
 export function TexturePreviewOverlay() {
   const modelObject = useAppStore((s) => s.loadedModel?.object)
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
@@ -22,14 +20,17 @@ export function TexturePreviewOverlay() {
     selectedSurfaceId ? s.placements[selectedSurfaceId] : undefined,
   )
   const previewActive = useBakeStore((s) => s.previewActive)
+  const isCommitted = useBakeStore((s) =>
+    selectedSurfaceId ? s.committedSurfaceIds.includes(selectedSurfaceId) : false,
+  )
 
   const settings = placement?.settings
   const lastMeshRef = useRef<Mesh | null>(null)
 
   useEffect(() => {
-    if (!modelObject || !selectedSurface || !settings?.patternId || !previewActive) {
-      if (lastMeshRef.current) {
-        removePreviewPattern(lastMeshRef.current)
+    if (!modelObject || !selectedSurface || !settings?.patternId) {
+      if (lastMeshRef.current && modelObject) {
+        removePreviewPattern(lastMeshRef.current, modelObject)
         lastMeshRef.current = null
       }
       return
@@ -41,23 +42,23 @@ export function TexturePreviewOverlay() {
     lastMeshRef.current = mesh
 
     try {
-      applyPreviewPattern(mesh, selectedSurface, settings)
+      if (previewActive) {
+        applyPreviewPattern(mesh, modelObject, selectedSurface, settings)
+      } else if (isCommitted) {
+        updateCommittedRegionSettings(mesh, modelObject, selectedSurface.surfaceId, settings)
+      } else {
+        removePreviewPattern(mesh, modelObject)
+      }
     } catch (err) {
-      removePreviewPattern(mesh)
+      removePreviewPattern(mesh, modelObject)
       lastMeshRef.current = null
       const message = err instanceof Error ? err.message : 'Preview failed.'
       useBakeStore.getState().setPreviewActive(false)
       useBakeStore.setState({ status: 'error', error: message })
     }
-
-    return () => {
-      if (lastMeshRef.current) {
-        removePreviewPattern(lastMeshRef.current)
-        lastMeshRef.current = null
-      }
-    }
   }, [
     previewActive,
+    isCommitted,
     selectedSurface,
     modelObject,
     settings?.patternId,
@@ -67,6 +68,8 @@ export function TexturePreviewOverlay() {
     settings?.offsetX,
     settings?.offsetY,
     settings?.depth,
+    settings?.smoothing,
+    settings?.invert,
     settings?.opacity,
   ])
 

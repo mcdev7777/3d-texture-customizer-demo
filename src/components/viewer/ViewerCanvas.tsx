@@ -23,10 +23,10 @@ function SceneContent() {
       <PerspectiveCamera makeDefault position={[5, 4, 5]} fov={45} near={0.01} far={1000} />
       <CameraController />
 
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[8, 12, 6]} intensity={1.1} />
-      <directionalLight position={[-6, 4, -4]} intensity={0.35} color="#c4b5fd" />
-      <pointLight position={[0, 6, 0]} intensity={0.2} color="#a78bfa" />
+      <ambientLight intensity={0.28} />
+      <directionalLight position={[8, 12, 6]} intensity={1.35} />
+      <directionalLight position={[-5, 3, -4]} intensity={0.22} color="#c4b5fd" />
+      <directionalLight position={[3, 2, 10]} intensity={0.45} color="#f8fafc" />
 
       <FloorGrid />
 
