@@ -6,11 +6,9 @@ import { useAppStore } from '../../store/useAppStore'
 import {
   loadModelFromFile,
   parseFileType,
-  unloadCurrentModel,
 } from '../../lib/loaders/loadModel'
+import { teardownLoadedModel } from '../../lib/model/teardownModel'
 import { ACCEPTED_FILE_EXTENSIONS } from '../../types/model'
-import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
-import { usePatternStore } from '../../store/usePatternStore'
 
 function yieldToMain(): Promise<void> {
   return new Promise((resolve) => {
@@ -26,14 +24,16 @@ interface FileDropzoneProps {
 
 export function FileDropzone({ compact }: FileDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const loadGenerationRef = useRef(0)
   const isLoading = useAppStore((s) => s.isLoading)
   const setLoading = useAppStore((s) => s.setLoading)
   const setError = useAppStore((s) => s.setError)
   const setLoadedModel = useAppStore((s) => s.setLoadedModel)
-  const loadedModel = useAppStore((s) => s.loadedModel)
 
   const handleFile = useCallback(
     async (file: File) => {
+      if (isLoading) return
+
       const fileType = parseFileType(file.name)
       if (!fileType) {
         setError(
@@ -42,23 +42,33 @@ export function FileDropzone({ compact }: FileDropzoneProps) {
         return
       }
 
+      const generation = ++loadGenerationRef.current
       setLoading(true)
       setError(null)
       await yieldToMain()
 
+      const previousModel = useAppStore.getState().loadedModel
+
       try {
-        useSurfaceSelectionStore.getState().clearSelection()
-        usePatternStore.getState().clearAll()
         const newModel = await loadModelFromFile(file)
-        unloadCurrentModel(loadedModel)
+        if (generation !== loadGenerationRef.current) {
+          teardownLoadedModel(newModel)
+          return
+        }
+
+        teardownLoadedModel(previousModel)
         setLoadedModel(newModel, file.name, fileType)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load model.')
+        if (generation === loadGenerationRef.current) {
+          setError(err instanceof Error ? err.message : 'Failed to load model.')
+        }
       } finally {
-        setLoading(false)
+        if (generation === loadGenerationRef.current) {
+          setLoading(false)
+        }
       }
     },
-    [loadedModel, setLoading, setError, setLoadedModel],
+    [isLoading, setLoading, setError, setLoadedModel],
   )
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,6 +80,7 @@ export function FileDropzone({ compact }: FileDropzoneProps) {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (isLoading) return
     const file = e.dataTransfer.files[0]
     if (file) void handleFile(file)
   }

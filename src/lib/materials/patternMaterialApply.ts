@@ -21,7 +21,14 @@ import {
 } from '../geometry/bakeReliefDisplacement'
 import { getConnectedCoplanarSurface } from '../surface/getConnectedCoplanarSurface'
 import { getFacesByAngle } from '../surface/selectByAngle'
+import { mapLiveFaceIndexToPristine } from '../surface/mapFaceToPristine'
+import { clampFaceIndex } from '../surface/meshUtils'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
+import {
+  registerMeshPristineGeometry,
+  unregisterMeshPristineGeometry,
+  clearMeshPristineRegistry,
+} from './meshPatternRegistry'
 
 const PREVIEW_SURFACE_ID = '__preview__'
 
@@ -41,6 +48,39 @@ interface MeshPatternState {
 }
 
 const meshStates = new Map<string, MeshPatternState>()
+
+function disposeOwnedMaterials(material: Material | Material[]): void {
+  const list = Array.isArray(material) ? material : [material]
+  for (const mat of list) {
+    if (mat) mat.dispose()
+  }
+}
+
+function disposeMeshPatternState(state: MeshPatternState): void {
+  state.pristineGeometry.dispose()
+  disposeOwnedMaterials(state.pristineMaterial)
+}
+
+function disposeLiveMeshMaterials(mesh: Mesh, state: MeshPatternState): void {
+  const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+  const pristineList = Array.isArray(state.pristineMaterial)
+    ? state.pristineMaterial
+    : [state.pristineMaterial]
+
+  for (const mat of oldMaterials) {
+    if (!mat) continue
+    if (mat.userData.isPatternMaterial) {
+      mat.dispose()
+      continue
+    }
+    if (!pristineList.includes(mat)) {
+      mat.dispose()
+    }
+  }
+}
+
+/** Pristine geometry for pattern indexing — used when resolving picks on modified meshes. */
+export { getMeshPatternPristineGeometry } from './meshPatternRegistry'
 
 function cloneMaterial(material: Material): Material {
   try {
@@ -69,6 +109,7 @@ function ensureMeshState(mesh: Mesh): MeshPatternState {
       regions: [],
     }
     meshStates.set(mesh.uuid, state)
+    registerMeshPristineGeometry(mesh.uuid, state.pristineGeometry)
   }
   return state
 }
@@ -197,13 +238,14 @@ function applyShaderRegions(
   const oldGeo = mesh.geometry
   if (oldGeo !== state.pristineGeometry) oldGeo.dispose()
 
-  const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-  for (const mat of oldMaterials) {
-    if (mat.userData.isPatternMaterial) mat.dispose()
-  }
+  disposeLiveMeshMaterials(mesh, state)
 
   mesh.geometry = rebuilt
   mesh.material = materials.length === 1 ? materials[0]! : materials
+
+  if (geometry !== state.pristineGeometry && geometry !== rebuilt) {
+    geometry.dispose()
+  }
 }
 
 function rebuildMesh(mesh: Mesh, modelRoot: Object3D, regions: PatternRegion[]): void {
@@ -220,10 +262,7 @@ function rebuildMesh(mesh: Mesh, modelRoot: Object3D, regions: PatternRegion[]):
     const oldGeo = mesh.geometry
     if (oldGeo !== state.pristineGeometry) oldGeo.dispose()
 
-    const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    for (const mat of oldMaterials) {
-      if (mat.userData.isPatternMaterial) mat.dispose()
-    }
+    disposeLiveMeshMaterials(mesh, state)
 
     mesh.geometry = geometry
     mesh.material = cloneMaterials(state.pristineMaterial)
@@ -260,11 +299,21 @@ function resolveTriangleIndices(
     return getAllTriangleIndices(geo)
   }
 
+  const triCount = getTriangleCount(geo)
+  const fromSelection = selectedSurface.triangleIndices
+  if (
+    fromSelection.length > 0 &&
+    fromSelection.every((t) => t >= 0 && t < triCount)
+  ) {
+    return [...fromSelection]
+  }
+
+  const liveFace = clampFaceIndex(selectedSurface.faceIndex, getTriangleCount(mesh.geometry))
+  const pristineFace = mapLiveFaceIndexToPristine(mesh, geo, liveFace)
   const { angleTolerance, connectedOnly } = useSurfaceSelectionStore.getState()
-  const faceIndex = selectedSurface.faceIndex
   return connectedOnly
-    ? getConnectedCoplanarSurface(geo, mesh, faceIndex, angleTolerance)
-    : getFacesByAngle(geo, mesh, faceIndex, angleTolerance)
+    ? getConnectedCoplanarSurface(geo, mesh, pristineFace, angleTolerance)
+    : getFacesByAngle(geo, mesh, pristineFace, angleTolerance)
 }
 
 function buildRegion(
@@ -337,27 +386,27 @@ export function resetMeshPatterns(mesh: Mesh): void {
   if (!state) return
 
   if (mesh.geometry !== state.pristineGeometry) mesh.geometry.dispose()
-
-  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-  for (const mat of materials) {
-    if (mat.userData.isPatternMaterial) mat.dispose()
-  }
+  disposeLiveMeshMaterials(mesh, state)
 
   mesh.geometry = state.pristineGeometry.clone()
   mesh.material = cloneMaterials(state.pristineMaterial)
+  disposeMeshPatternState(state)
+  unregisterMeshPristineGeometry(mesh.uuid)
   meshStates.delete(mesh.uuid)
 }
 
 export function resetAllPatterns(modelRoot: Object3D | null): void {
-  if (!modelRoot) {
+  if (modelRoot) {
+    modelRoot.traverse((child) => {
+      if ('isMesh' in child && child.isMesh) resetMeshPatterns(child as Mesh)
+    })
+  } else {
+    for (const state of meshStates.values()) {
+      disposeMeshPatternState(state)
+    }
     meshStates.clear()
-    return
+    clearMeshPristineRegistry()
   }
-
-  modelRoot.traverse((child) => {
-    if ('isMesh' in child && child.isMesh) resetMeshPatterns(child as Mesh)
-  })
-  meshStates.clear()
 }
 
 export function uncommitSurfacePattern(modelRoot: Object3D | null, surfaceId: string): boolean {

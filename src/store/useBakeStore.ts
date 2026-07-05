@@ -29,6 +29,8 @@ export const useBakeStore = create<BakeState>((set, get) => ({
   setPreviewActive: (active) => set({ previewActive: active }),
 
   applyTexture: async () => {
+    if (get().status === 'applying') return false
+
     const loadedModel = useAppStore.getState().loadedModel
     if (!loadedModel) {
       set({ status: 'error', error: 'Load a model before applying a texture.' })

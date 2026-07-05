@@ -9,22 +9,24 @@ import {
 } from '../surface/restoreSurfaceFromId'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useBakeStore } from '../../store/useBakeStore'
-import { countResolvedMeshes, remapVariationForModel } from './remapVariation'
+import { assertVariationMatchesLoadedModel } from './modelFileMatch'
+import { remapVariationForModel, validateVariationResolution } from './remapVariation'
 
 /** Restore pattern placements, re-apply committed textures, and re-select surface. */
-export function applyVariation(variation: ModelVariation, modelRoot: Object3D): void {
-  const resolved = countResolvedMeshes(variation, modelRoot)
-  if (variation.placements.length > 0 && resolved === 0) {
-    throw new Error(
-      'Could not match saved surfaces to this model. Reload the same file, then save the variation again.',
-    )
-  }
+export function applyVariation(
+  variation: ModelVariation,
+  modelRoot: Object3D,
+  currentFileName: string | null,
+): void {
+  assertVariationMatchesLoadedModel(variation.sourceModelName, currentFileName)
+  validateVariationResolution(variation, modelRoot, currentFileName)
 
   useBakeStore.getState().resetAll()
 
   const { placements, committedSurfaceIds, selectedSurfaceId } = remapVariationForModel(
     variation,
     modelRoot,
+    currentFileName,
   )
 
   usePatternStore.setState({ placements })
@@ -47,8 +49,11 @@ export function applyVariation(variation: ModelVariation, modelRoot: Object3D): 
     try {
       commitPatternMaterial(mesh, modelRoot, surface, entry.settings)
       appliedCommitted.push(surfaceId)
-    } catch {
-      // Skip surfaces that fail to apply.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Apply failed.'
+      throw new Error(`Could not apply variation: ${message}`)
+    } finally {
+      surface.highlightGeometry.dispose()
     }
   }
 

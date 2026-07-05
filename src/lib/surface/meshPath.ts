@@ -83,14 +83,19 @@ export function findMeshByOrdinal(root: Object3D, ordinal: number): Mesh | null 
   return found
 }
 
+export type MeshResolveMode = 'strict' | 'reload'
+
 export function resolveMesh(
   root: Object3D,
   refs: { uuid?: string; meshPath?: string; meshOrdinal?: number; meshName?: string },
+  mode: MeshResolveMode = 'strict',
 ): Mesh | null {
   if (refs.meshPath) {
     const byPath = findMeshByPath(root, refs.meshPath)
     if (byPath) return byPath
   }
+
+  if (mode === 'strict') return null
 
   if (refs.meshOrdinal !== undefined && refs.meshOrdinal >= 0) {
     const byOrdinal = findMeshByOrdinal(root, refs.meshOrdinal)

@@ -1,5 +1,11 @@
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { hydrateCustomTexturesFromStorage } from './store/useCustomTextureStore'
 import './styles/index.css'
 
-createRoot(document.getElementById('root')!).render(<App />)
+async function bootstrap() {
+  await hydrateCustomTexturesFromStorage()
+  createRoot(document.getElementById('root')!).render(<App />)
+}
+
+void bootstrap()

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { Mesh } from 'three'
+import type { Mesh, Object3D } from 'three'
 import { useAppStore } from '../../store/useAppStore'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
@@ -10,6 +10,11 @@ import {
   updateCommittedRegionSettings,
 } from '../../lib/materials/patternMaterialApply'
 import { findMeshByUuid } from '../../lib/surface/restoreSurfaceFromId'
+
+interface PreviewTarget {
+  mesh: Mesh
+  modelRoot: Object3D
+}
 
 /** Live bump preview + committed region depth updates. */
 export function TexturePreviewOverlay() {
@@ -25,33 +30,58 @@ export function TexturePreviewOverlay() {
   )
 
   const settings = placement?.settings
-  const lastMeshRef = useRef<Mesh | null>(null)
+  const lastTargetRef = useRef<PreviewTarget | null>(null)
 
   useEffect(() => {
     if (!modelObject || !selectedSurface || !settings?.patternId) {
-      if (lastMeshRef.current && modelObject) {
-        removePreviewPattern(lastMeshRef.current, modelObject)
-        lastMeshRef.current = null
-      }
       return
     }
 
     const mesh = findMeshByUuid(modelObject, selectedSurface.meshUuid)
-    if (!mesh) return
+    if (!mesh) {
+      useBakeStore.getState().setPreviewActive(false)
+      useBakeStore.setState({
+        status: 'error',
+        error: 'Could not find the selected mesh in the loaded model.',
+      })
+      return
+    }
 
-    lastMeshRef.current = mesh
+    const previousTarget = lastTargetRef.current
+    if (
+      previousTarget &&
+      (previousTarget.mesh !== mesh || previousTarget.modelRoot !== modelObject)
+    ) {
+      try {
+        removePreviewPattern(previousTarget.mesh, previousTarget.modelRoot)
+      } catch {
+        // Model may already be disposed during unload.
+      }
+    }
+
+    lastTargetRef.current = { mesh, modelRoot: modelObject }
 
     try {
       if (previewActive) {
         applyPreviewPattern(mesh, modelObject, selectedSurface, settings)
       } else if (isCommitted) {
-        updateCommittedRegionSettings(mesh, modelObject, selectedSurface.surfaceId, settings)
+        const updated = updateCommittedRegionSettings(
+          mesh,
+          modelObject,
+          selectedSurface.surfaceId,
+          settings,
+        )
+        if (!updated) {
+          useBakeStore.setState({
+            status: 'error',
+            error: 'Could not update applied texture — try applying again.',
+          })
+        }
       } else {
         removePreviewPattern(mesh, modelObject)
       }
     } catch (err) {
-      removePreviewPattern(mesh, modelObject)
-      lastMeshRef.current = null
+      lastTargetRef.current = null
       const message = err instanceof Error ? err.message : 'Preview failed.'
       useBakeStore.getState().setPreviewActive(false)
       useBakeStore.setState({ status: 'error', error: message })
@@ -72,6 +102,19 @@ export function TexturePreviewOverlay() {
     settings?.invert,
     settings?.opacity,
   ])
+
+  useEffect(() => {
+    return () => {
+      const target = lastTargetRef.current
+      if (!target) return
+      try {
+        removePreviewPattern(target.mesh, target.modelRoot)
+      } catch {
+        // Model may already be disposed during unload.
+      }
+      lastTargetRef.current = null
+    }
+  }, [modelObject])
 
   return null
 }
