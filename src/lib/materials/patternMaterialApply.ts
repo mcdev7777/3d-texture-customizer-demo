@@ -11,7 +11,6 @@ import type { SelectedSurface, SelectionMode } from '../../types/surfaceSelectio
 import {
   buildPatternMaterialOptions,
   createPatternShaderMaterial,
-  updatePatternShaderMaterial,
 } from './patternShaderMaterial'
 import { extractBaseColor } from './extractBaseColor'
 
@@ -235,29 +234,28 @@ export function resetAllPatterns(modelRoot: Object3D | null): void {
   meshStates.clear()
 }
 
-export function isPatternShaderMaterial(material: Material): material is ShaderMaterial {
-  return material instanceof ShaderMaterial && material.userData.isPatternMaterial === true
+/** Remove one committed pattern region and restore geometry/material if none remain. */
+export function uncommitSurfacePattern(modelRoot: Object3D | null, surfaceId: string): boolean {
+  if (!modelRoot) return false
+
+  let found = false
+  modelRoot.traverse((child) => {
+    if (!('isMesh' in child) || !child.isMesh) return
+    const mesh = child as Mesh
+    const state = meshStates.get(mesh.uuid)
+    if (!state?.regions.some((r) => r.surfaceId === surfaceId)) return
+
+    found = true
+    state.regions = state.regions.filter((r) => r.surfaceId !== surfaceId)
+    if (state.regions.length === 0) {
+      resetMeshPatterns(mesh)
+    } else {
+      rebuildMesh(mesh, state.regions)
+    }
+  })
+  return found
 }
 
-export function updateLivePatternUniforms(
-  mesh: Mesh,
-  selectedSurface: SelectedSurface,
-  settings: SurfacePatternSettings,
-): void {
-  const state = meshStates.get(mesh.uuid)
-  if (!state) return
-
-  const region = buildRegion(mesh, selectedSurface, settings, selectedSurface.surfaceId)
-  const options = buildPatternMaterialOptions(
-    mesh,
-    state.pristineGeometry,
-    region,
-    getOriginalMaterial(state),
-  )
-
-  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-  for (const mat of materials) {
-    if (!isPatternShaderMaterial(mat)) continue
-    updatePatternShaderMaterial(mat, options)
-  }
+export function isPatternShaderMaterial(material: Material): material is ShaderMaterial {
+  return material instanceof ShaderMaterial && material.userData.isPatternMaterial === true
 }

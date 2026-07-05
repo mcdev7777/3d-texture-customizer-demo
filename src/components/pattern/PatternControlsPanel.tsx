@@ -59,6 +59,7 @@ export function PatternControlsPanel() {
   const placement = usePatternStore((s) => (surfaceId ? s.placements[surfaceId] : null))
   const updateSettings = usePatternStore((s) => s.updateSettings)
   const resetSurface = usePatternStore((s) => s.resetSurface)
+  const removeCommitted = useBakeStore((s) => s.removeCommitted)
   const setPreviewActive = useBakeStore((s) => s.setPreviewActive)
 
   const settings = placement?.settings
@@ -164,7 +165,12 @@ export function PatternControlsPanel() {
           <div className="mt-3 pt-3 border-t border-purple-500/10">
             <Button
               icon={<RotateCcw className="h-3.5 w-3.5" />}
-              onClick={() => surfaceId && resetSurface(surfaceId)}
+              onClick={() => {
+                if (!surfaceId) return
+                resetSurface(surfaceId)
+                removeCommitted(surfaceId)
+                setPreviewActive(false)
+              }}
               className="w-full text-xs"
             >
               Reset surface pattern

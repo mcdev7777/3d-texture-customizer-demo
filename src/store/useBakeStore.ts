@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { BakeStatus, ExportFormat } from '../types/bake'
-import { commitPatternMaterial, resetAllPatterns } from '../lib/materials/patternMaterialApply'
+import { commitPatternMaterial, resetAllPatterns, uncommitSurfacePattern } from '../lib/materials/patternMaterialApply'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { useAppStore } from './useAppStore'
@@ -79,9 +79,15 @@ export const useBakeStore = create<BakeState>((set, get) => ({
     }
   },
 
-  removeCommitted: (_surfaceId) => {
-    // Per-surface undo is not supported in the in-place approach;
-    // use resetAll instead.
+  removeCommitted: (surfaceId) => {
+    const loadedModel = useAppStore.getState().loadedModel
+    const removed = uncommitSurfacePattern(loadedModel?.object ?? null, surfaceId)
+    if (removed) {
+      set({
+        committedSurfaceIds: get().committedSurfaceIds.filter((id) => id !== surfaceId),
+        previewActive: false,
+      })
+    }
   },
 
   resetAll: () => {

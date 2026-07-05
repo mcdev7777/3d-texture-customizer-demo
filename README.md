@@ -1,8 +1,8 @@
 # Texture Studio
 
-Add real, printable surface textures to 3D models. Load a model, select a surface or
-part, pick a built-in or custom texture, dial in the look, apply it as actual displaced
-mesh geometry, and export the updated model.
+Apply seamless texture patterns to 3D models. Load a model, select a surface or part,
+pick a built-in or custom pattern, preview the look, apply it to the mesh material, and
+export the result.
 
 ## Setup
 
@@ -49,19 +49,15 @@ Models are centered and scaled to fit the workspace on load. A sample model is i
    - *Part* mode selects an entire mesh.
 3. **Choose a texture** from the library (Hex, Grid, Diamond, Honeycomb, Scales, Ribbed,
    Dots, Waves, Zigzag, Brick, Crosshatch, Cracks), or **Load Texture** to upload your own
-   PNG/JPG/WebP. Uploaded images are used as a height mask (light raises, dark stays flat)
-   and never replace the surface color.
-4. **Adjust** scale, depth, rotation, and offset. Switch between **Emboss** (raised) and
-   **Engrave** (recessed).
-5. **Preview** shows the effect as real displaced geometry on the selected area. Whole-part
-   selections texture each major face orientation correctly.
-6. **Apply texture** commits the pattern as actual mesh geometry — emboss raises the
-   surface outward, engrave recesses it. The surface keeps its original color and normals
-   are recomputed. **Reset to original** clears applied geometry and textures.
-7. **Export Model** downloads the textured model as STL, OBJ, GLB, or 3MF. Only applied
-   geometry is included — preview and selection helpers are never exported. GLB includes
-   geometry and material; STL, OBJ, and 3MF export geometry only. 3MF is a print-ready
-   package for modern slicers.
+   PNG/JPG/WebP height mask (white = base surface color, black = emphasized detail).
+4. **Adjust** scale, depth, rotation, and offset. Switch between **Emboss** and **Engrave**.
+5. **Preview** shows the pattern on the selected area using the same material mapping as
+   Apply. Part mode maps all faces; surface mode maps the selected face only.
+6. **Apply texture** commits the pattern material to the mesh. Depth controls bump shadows
+   around black pattern areas. **Reset surface pattern** clears one applied area;
+   **Reset to original** clears everything.
+7. **Export Model** downloads the textured model as STL, OBJ, GLB, or 3MF. GLB includes
+   materials; STL, OBJ, and 3MF export base geometry only.
 
 ## Viewer controls
 

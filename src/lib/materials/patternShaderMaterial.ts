@@ -2,6 +2,9 @@ import {
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
+  MeshBasicMaterial,
+  MeshPhongMaterial,
+  MeshStandardMaterial,
   ShaderMaterial,
   Vector2,
   Vector3,
@@ -183,6 +186,18 @@ export interface PatternMaterialOptions {
   bounds?: PatternBounds
 }
 
+function cloneMaterialWithColor(material: Material, colorHex: number): Material {
+  const clone = material.clone()
+  if (
+    clone instanceof MeshStandardMaterial ||
+    clone instanceof MeshPhongMaterial ||
+    clone instanceof MeshBasicMaterial
+  ) {
+    clone.color.setHex(colorHex)
+  }
+  return clone
+}
+
 function readMaterialProps(material: Material): { metalness: number; roughness: number } {
   if ('metalness' in material && 'roughness' in material) {
     return {
@@ -306,8 +321,7 @@ export function buildPatternMaterialOptions(
   },
   baseMaterial: Material,
 ): PatternMaterialOptions {
-  const tint = baseMaterial.clone()
-  if ('color' in tint && tint.color) tint.color.setHex(region.baseColorHex)
+  const tint = cloneMaterialWithColor(baseMaterial, region.baseColorHex)
 
   const projection = buildProjectionForMesh(
     mesh,
