@@ -1,7 +1,6 @@
 import { create } from 'zustand'
-import type { BakeStatus, ExportFormat } from '../types/bake'
+import type { BakeStatus } from '../types/bake'
 import { commitPatternMaterial, resetAllPatterns, uncommitSurfacePattern } from '../lib/materials/patternMaterialApply'
-import { exportModifiedModel } from '../lib/export/exportModifiedModel'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { useAppStore } from './useAppStore'
 import { usePatternStore } from './usePatternStore'
@@ -18,7 +17,6 @@ interface BakeState {
   applyTexture: () => Promise<boolean>
   removeCommitted: (surfaceId: string) => void
   resetAll: () => void
-  exportModel: (format: ExportFormat) => Promise<boolean>
 }
 
 export const useBakeStore = create<BakeState>((set, get) => ({
@@ -100,32 +98,5 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       error: null,
       previewActive: false,
     })
-  },
-
-  exportModel: async (format) => {
-    const loadedModel = useAppStore.getState().loadedModel
-    if (!loadedModel) {
-      set({ status: 'error', error: 'Load a model before exporting.' })
-      return false
-    }
-
-    if (get().committedSurfaceIds.length === 0) {
-      set({ status: 'error', error: 'Apply a texture before exporting.' })
-      return false
-    }
-
-    const fileName = useAppStore.getState().fileName?.replace(/\.[^.]+$/, '') ?? 'textured-model'
-
-    set({ status: 'exporting', error: null })
-
-    try {
-      await exportModifiedModel({ object: loadedModel.object, format, fileName })
-      set({ status: 'idle', error: null })
-      return true
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Export failed.'
-      set({ status: 'error', error: message })
-      return false
-    }
   },
 }))

@@ -13,15 +13,13 @@ export function BottomStatusBar() {
   const bakeLabel =
     bakeStatus === 'applying'
       ? 'Applying…'
-      : bakeStatus === 'exporting'
-        ? 'Exporting…'
-        : bakeStatus === 'error'
-          ? 'Error'
-          : appliedCount > 0
-            ? `${appliedCount} textured`
-            : previewActive
-              ? 'Preview'
-              : null
+      : bakeStatus === 'error'
+        ? 'Error'
+        : appliedCount > 0
+          ? `${appliedCount} textured`
+          : previewActive
+            ? 'Preview'
+            : null
 
   return (
     <footer className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-2 panel-glass rounded-xl text-xs text-slate-400 shrink-0">
