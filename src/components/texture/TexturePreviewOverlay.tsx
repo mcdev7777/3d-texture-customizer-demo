@@ -11,9 +11,8 @@ import {
 import { findMeshByUuid } from '../../lib/surface/restoreSurfaceFromId'
 
 /**
- * Headless component that previews the pattern as a material replacement on
- * the selected mesh — white pattern areas keep the surface base color, black
- * areas use a darker emphasis tint with bump shading (no geometry extrusion).
+ * Headless component that previews bump-map pattern shading on the selected mesh —
+ * the surface keeps its original color everywhere; pattern detail comes from lighting only.
  */
 export function TexturePreviewOverlay() {
   const modelObject = useAppStore((s) => s.loadedModel?.object)

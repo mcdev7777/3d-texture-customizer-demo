@@ -97,9 +97,9 @@ export function BakeExportPanel() {
         </div>
 
         <p className="text-[10px] text-slate-500">
-          Apply replaces the surface color with the pattern. Depth controls bump shadows
-          around black areas — not color darkness. Part mode maps all faces; surface mode
-          maps the selected face only.
+          Apply adds bump-map shading — the surface color stays the same; pattern detail
+          comes from shadows and highlights. Depth controls relief strength. Part mode
+          maps all faces; surface mode maps the selected face only.
         </p>
 
         <div className="pt-2 border-t border-purple-500/10">

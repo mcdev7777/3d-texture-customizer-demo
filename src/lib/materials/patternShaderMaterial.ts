@@ -7,224 +7,185 @@ import {
   MeshPhongMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
-  ShaderMaterial,
   Vector2,
   Vector3,
   type Material,
   type Mesh,
   type Texture,
+  type WebGLProgramParametersWithUniforms,
 } from 'three'
 import type { SelectionMode } from '../../types/surfaceSelection'
 import type { SurfacePatternSettings } from '../../types/pattern'
 import { createSurfaceProjectionFromHighlight, type SurfaceProjection } from '../geometry/surfaceProjection'
 import { BASE_TILE_WORLD, depthLevelToWorld } from '../textures/patternPlacementMath'
-import { computeEmphasisColor, extractBaseColor } from './extractBaseColor'
 import { getPatternTexture, getPatternTextureAspect } from './patternTexture'
 import { computePatternBounds, type PatternBounds } from './patternBounds'
 
 const MAPPING_PLANAR = 0
 const MAPPING_CUBIC = 1
 
-const vertexShader = /* glsl */ `
-  varying vec3 vWorldPos;
-  varying vec3 vViewPos;
-  varying vec3 vViewNormal;
-  varying vec3 vWorldNormal;
+type PatternUniformBag = Record<string, { value: unknown }>
 
-  void main() {
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
-    vWorldPos = worldPos.xyz;
-    vWorldNormal = normalize(mat3(modelMatrix) * normal);
-    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-    vViewPos = mvPos.xyz;
-    vViewNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * mvPos;
-  }
+const PATTERN_VERTEX_PARS = /* glsl */ `
+varying vec3 vPatternWorldPos;
 `
 
-const fragmentShader = /* glsl */ `
-  uniform sampler2D patternMap;
-  uniform vec3 baseColor;
-  uniform vec3 emphasisColor;
-  uniform vec3 originWorld;
-  uniform vec3 tangentWorld;
-  uniform vec3 bitangentWorld;
-  uniform float tileWorld;
-  uniform float rotationRad;
-  uniform vec2 offsetUV;
-  uniform vec2 textureAspect;
-  uniform float bumpStrength;
-  uniform int engraveMode;
-  uniform int mappingMode;
-  uniform vec3 boundsMin;
-  uniform vec3 boundsSize;
-  uniform float metalness;
-  uniform float roughness;
+const PATTERN_VERTEX_ASSIGN = /* glsl */ `
+vPatternWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+`
 
-  varying vec3 vWorldPos;
-  varying vec3 vViewPos;
-  varying vec3 vViewNormal;
-  varying vec3 vWorldNormal;
+const PATTERN_FRAGMENT_PARS = /* glsl */ `
+uniform sampler2D patternMap;
+uniform vec3 patternOriginWorld;
+uniform vec3 patternTangentWorld;
+uniform vec3 patternBitangentWorld;
+uniform float patternTileWorld;
+uniform float patternRotationRad;
+uniform vec2 patternOffsetUV;
+uniform vec2 patternTextureAspect;
+uniform float patternBumpStrength;
+uniform int patternEngraveMode;
+uniform int patternMappingMode;
+uniform vec3 patternBoundsMin;
+uniform vec3 patternBoundsSize;
 
-  const float CUBIC_AXIS_EPSILON = 1e-4;
+varying vec3 vPatternWorldPos;
 
-  int dominantCubicAxis(vec3 n) {
-    vec3 absN = abs(n);
-    if (absN.x >= absN.y - CUBIC_AXIS_EPSILON && absN.x >= absN.z - CUBIC_AXIS_EPSILON) return 0;
-    if (absN.y >= absN.z - CUBIC_AXIS_EPSILON) return 1;
-    return 2;
-  }
+const float PATTERN_CUBIC_AXIS_EPSILON = 1e-4;
 
-  vec3 cubicBlendWeights(vec3 n) {
-    vec3 absN = abs(n);
-    int axis = dominantCubicAxis(n);
-    if (axis == 0) return vec3(1.0, 0.0, 0.0);
-    if (axis == 1) return vec3(0.0, 1.0, 0.0);
-    return vec3(0.0, 0.0, 1.0);
-  }
+int patternDominantCubicAxis(vec3 n) {
+  vec3 absN = abs(n);
+  if (absN.x >= absN.y - PATTERN_CUBIC_AXIS_EPSILON && absN.x >= absN.z - PATTERN_CUBIC_AXIS_EPSILON) return 0;
+  if (absN.y >= absN.z - PATTERN_CUBIC_AXIS_EPSILON) return 1;
+  return 2;
+}
 
-  float samplePatternMap(vec2 rawUV) {
-    vec2 uv = (rawUV * textureAspect) / tileWorld;
-    float c = cos(rotationRad);
-    float s = sin(rotationRad);
-    uv -= 0.5;
-    uv = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
-    uv += 0.5;
-    uv += offsetUV;
-    return texture2D(patternMap, uv).r;
-  }
+vec3 patternCubicBlendWeights(vec3 n) {
+  int axis = patternDominantCubicAxis(n);
+  if (axis == 0) return vec3(1.0, 0.0, 0.0);
+  if (axis == 1) return vec3(0.0, 1.0, 0.0);
+  return vec3(0.0, 0.0, 1.0);
+}
 
-  float patternHeightPlanar(vec3 pos) {
-    vec3 rel = pos - originWorld;
-    float uWorld = dot(rel, tangentWorld);
-    float vWorld = dot(rel, bitangentWorld);
-    return samplePatternMap(vec2(uWorld, vWorld));
-  }
+float patternSampleMap(vec2 rawUV) {
+  vec2 uv = (rawUV * patternTextureAspect) / patternTileWorld;
+  float c = cos(patternRotationRad);
+  float s = sin(patternRotationRad);
+  uv -= 0.5;
+  uv = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
+  uv += 0.5;
+  uv += patternOffsetUV;
+  return texture2D(patternMap, uv).r;
+}
 
-  float patternHeightCubic(vec3 pos, vec3 projN) {
-    float md = max(max(boundsSize.x, max(boundsSize.y, boundsSize.z)), 1e-4);
+float patternHeightPlanar(vec3 pos) {
+  vec3 rel = pos - patternOriginWorld;
+  float uWorld = dot(rel, patternTangentWorld);
+  float vWorld = dot(rel, patternBitangentWorld);
+  return patternSampleMap(vec2(uWorld, vWorld));
+}
 
-    float yzU = (pos.y - boundsMin.y) / md;
-    if (projN.x < 0.0) yzU = -yzU;
-    float xzU = (pos.x - boundsMin.x) / md;
-    if (projN.y > 0.0) xzU = -xzU;
-    float xyU = (pos.x - boundsMin.x) / md;
-    if (projN.z < 0.0) xyU = -xyU;
+float patternHeightCubic(vec3 pos, vec3 projN) {
+  float md = max(max(patternBoundsSize.x, max(patternBoundsSize.y, patternBoundsSize.z)), 1e-4);
 
-    float hXY = samplePatternMap(vec2(xyU, (pos.y - boundsMin.y) / md));
-    float hXZ = samplePatternMap(vec2(xzU, (pos.z - boundsMin.z) / md));
-    float hYZ = samplePatternMap(vec2(yzU, (pos.z - boundsMin.z) / md));
+  float yzU = (pos.y - patternBoundsMin.y) / md;
+  if (projN.x < 0.0) yzU = -yzU;
+  float xzU = (pos.x - patternBoundsMin.x) / md;
+  if (projN.y > 0.0) xzU = -xzU;
+  float xyU = (pos.x - patternBoundsMin.x) / md;
+  if (projN.z < 0.0) xyU = -xyU;
 
-    vec3 wts = cubicBlendWeights(projN);
-    return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
-  }
+  float hXY = patternSampleMap(vec2(xyU, (pos.y - patternBoundsMin.y) / md));
+  float hXZ = patternSampleMap(vec2(xzU, (pos.z - patternBoundsMin.z) / md));
+  float hYZ = patternSampleMap(vec2(yzU, (pos.z - patternBoundsMin.z) / md));
 
-  float patternHeight(vec3 pos, vec3 projN) {
-    if (mappingMode == 1) return patternHeightCubic(pos, projN);
-    return patternHeightPlanar(pos);
-  }
+  vec3 wts = patternCubicBlendWeights(projN);
+  return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
+}
 
-  float patternEmphasis(float h) {
-    float emphasis = 1.0 - h;
-    if (engraveMode == 1) emphasis = 1.0 - emphasis;
-    return clamp(emphasis, 0.0, 1.0);
-  }
+float patternHeightAt(vec3 pos, vec3 projN) {
+  if (patternMappingMode == 1) return patternHeightCubic(pos, projN);
+  return patternHeightPlanar(pos);
+}
 
-  vec3 shade(vec3 albedo, vec3 N) {
-    vec3 L1 = normalize(vec3(0.5, 0.8, 1.0));
-    vec3 L2 = normalize(vec3(-0.5, -0.2, -0.6));
-    vec3 V = normalize(-vViewPos);
-    float diff1 = max(dot(N, L1), 0.0);
-    float diff2 = max(dot(N, L2), 0.0) * 0.35;
-    vec3 H = normalize(L1 + V);
-    float spec = pow(max(dot(N, H), 0.0), mix(8.0, 64.0, 1.0 - roughness)) * (0.15 + (1.0 - roughness) * 0.45);
-    vec3 lit = albedo * (0.45 + diff1 * 0.55 + diff2 * 0.15);
-    lit += vec3(spec) * (0.25 + metalness * 0.35);
-    return lit;
-  }
+vec3 patternFaceNormal(vec3 pos) {
+  vec3 dpx = dFdx(pos);
+  vec3 dpy = dFdy(pos);
+  vec3 faceN = cross(dpx, dpy);
+  return length(faceN) > 1e-10 ? normalize(faceN) : vec3(0.0, 0.0, 1.0);
+}
+`
 
-  void main() {
-    vec3 N = normalize(vViewNormal);
-    N *= gl_FrontFacing ? 1.0 : -1.0;
+const PATTERN_BUMP_INJECT = /* glsl */ `
+{
+  vec3 patternProjN = patternFaceNormal(vPatternWorldPos);
+  float patternRawH = patternHeightAt(vPatternWorldPos, patternProjN);
+  float h = smoothstep(0.08, 0.92, patternRawH);
+  float heightField = patternEngraveMode == 1 ? (1.0 - h) : h;
 
-    vec3 dpx = dFdx(vWorldPos);
-    vec3 dpy = dFdy(vWorldPos);
-    vec3 faceN = cross(dpx, dpy);
-    vec3 projN = length(faceN) > 1e-10 ? normalize(faceN) : normalize(vWorldNormal);
+  float dhx = dFdx(heightField);
+  float dhy = dFdy(heightField);
 
-    float rawH = patternHeight(vWorldPos, projN);
-    float emphasis = patternEmphasis(rawH);
-    vec3 albedo = mix(baseColor, emphasisColor, emphasis);
-
-    // Bump from emphasis field (black = high) so depth drives shadow, not albedo.
-    float dhx = dFdx(emphasis);
-    float dhy = dFdy(emphasis);
-
-    vec3 dp1 = dFdx(vViewPos);
-    vec3 dp2 = dFdy(vViewPos);
-    vec3 T = dp1 - dot(dp1, N) * N;
-    vec3 B = dp2 - dot(dp2, N) * N;
-    float lenT = length(T);
-    float lenB = length(B);
-    T = lenT > 1e-5 ? T / lenT : vec3(1.0, 0.0, 0.0);
-    B = lenB > 1e-5 ? B / lenB : vec3(0.0, 1.0, 0.0);
-
-    float posScale = max(length(dp1) + length(dp2), 1e-6);
-    float bumpScale = bumpStrength * 6.0 / posScale;
-    vec3 bumpVec = N - bumpScale * (dhx * T + dhy * B);
-    vec3 bumpN = length(bumpVec) > 1e-6 ? normalize(bumpVec) : N;
-
-    vec3 color = shade(albedo, bumpN);
-    gl_FragColor = vec4(color, 1.0);
-  }
+  vec3 dp1 = dFdx(vViewPosition);
+  vec3 dp2 = dFdy(vViewPosition);
+  vec3 T = dp1 - dot(dp1, normal) * normal;
+  vec3 B = dp2 - dot(dp2, normal) * normal;
+  T /= max(length(T), 1e-5);
+  B /= max(length(B), 1e-5);
+  float posScale = max(length(dp1) + length(dp2), 1e-6);
+  float bumpScale = patternBumpStrength * 55.0 / posScale;
+  vec3 bumpNormal = normal - bumpScale * (dhx * T + dhy * B);
+  normal = normalize(bumpNormal);
+}
 `
 
 export interface PatternMaterialOptions {
   settings: SurfacePatternSettings
   projection: SurfaceProjection
   baseMaterial: Material
+  sourceGeometry: BufferGeometry
   patternTexture?: Texture
   mappingMode: SelectionMode
   bounds?: PatternBounds
 }
 
-function cloneMaterialWithColor(material: Material, colorHex: number): Material {
-  let clone: Material
+function isStandardCompatibleMaterial(
+  material: Material,
+): material is MeshStandardMaterial | MeshPhysicalMaterial | MeshPhongMaterial | MeshLambertMaterial {
+  return (
+    material instanceof MeshStandardMaterial ||
+    material instanceof MeshPhysicalMaterial ||
+    material instanceof MeshPhongMaterial ||
+    material instanceof MeshLambertMaterial
+  )
+}
+
+function cloneBaseMaterial(material: Material): Material {
   try {
-    clone = material.clone()
+    return material.clone()
   } catch {
-    clone = new MeshStandardMaterial()
+    return new MeshStandardMaterial()
   }
+}
+
+function ensureVertexColors(material: Material, geometry: BufferGeometry): void {
+  if (!geometry.getAttribute('color')) return
   if (
-    clone instanceof MeshStandardMaterial ||
-    clone instanceof MeshPhysicalMaterial ||
-    clone instanceof MeshPhongMaterial ||
-    clone instanceof MeshLambertMaterial ||
-    clone instanceof MeshBasicMaterial
+    material instanceof MeshStandardMaterial ||
+    material instanceof MeshPhysicalMaterial ||
+    material instanceof MeshPhongMaterial ||
+    material instanceof MeshLambertMaterial ||
+    material instanceof MeshBasicMaterial
   ) {
-    clone.color.setHex(colorHex)
+    material.vertexColors = true
   }
-  return clone
 }
 
-function readMaterialProps(material: Material): { metalness: number; roughness: number } {
-  if ('metalness' in material && 'roughness' in material) {
-    return {
-      metalness: typeof material.metalness === 'number' ? material.metalness : 0.15,
-      roughness: typeof material.roughness === 'number' ? material.roughness : 0.55,
-    }
-  }
-  return { metalness: 0.1, roughness: 0.6 }
-}
-
-function buildUniforms(options: PatternMaterialOptions) {
-  const { settings, projection, baseMaterial, mappingMode, bounds } = options
+function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
+  const { settings, projection, mappingMode, bounds } = options
   const patternId = settings.patternId
   if (!patternId) throw new Error('Pattern id is required.')
 
-  const baseColor = extractBaseColor(baseMaterial)
-  const emphasisColor = computeEmphasisColor(baseColor)
-  const { metalness, roughness } = readMaterialProps(baseMaterial)
   const tileWorld = BASE_TILE_WORLD / Math.max(0.05, settings.scale)
   const aspect = getPatternTextureAspect(patternId)
   const b = bounds ?? {
@@ -236,52 +197,104 @@ function buildUniforms(options: PatternMaterialOptions) {
 
   return {
     patternMap: { value: options.patternTexture ?? getPatternTexture(patternId) },
-    baseColor: { value: baseColor },
-    emphasisColor: { value: emphasisColor },
-    originWorld: { value: projection.originWorld.clone() },
-    tangentWorld: { value: projection.tangentWorld.clone() },
-    bitangentWorld: { value: projection.bitangentWorld.clone() },
-    tileWorld: { value: tileWorld },
-    rotationRad: { value: (settings.rotation * Math.PI) / 180 },
-    offsetUV: { value: new Vector2(settings.offsetX, settings.offsetY) },
-    textureAspect: { value: new Vector2(aspect.u, aspect.v) },
-    bumpStrength: { value: depthLevelToWorld(settings.depth) },
-    engraveMode: { value: settings.mode === 'engrave' ? 1 : 0 },
-    mappingMode: { value: mappingMode === 'part' ? MAPPING_CUBIC : MAPPING_PLANAR },
-    boundsMin: { value: b.min.clone() },
-    boundsSize: { value: b.size.clone() },
-    metalness: { value: metalness },
-    roughness: { value: roughness },
+    patternOriginWorld: { value: projection.originWorld.clone() },
+    patternTangentWorld: { value: projection.tangentWorld.clone() },
+    patternBitangentWorld: { value: projection.bitangentWorld.clone() },
+    patternTileWorld: { value: tileWorld },
+    patternRotationRad: { value: (settings.rotation * Math.PI) / 180 },
+    patternOffsetUV: { value: new Vector2(settings.offsetX, settings.offsetY) },
+    patternTextureAspect: { value: new Vector2(aspect.u, aspect.v) },
+    patternBumpStrength: { value: depthLevelToWorld(settings.depth) },
+    patternEngraveMode: { value: settings.mode === 'engrave' ? 1 : 0 },
+    patternMappingMode: { value: mappingMode === 'part' ? MAPPING_CUBIC : MAPPING_PLANAR },
+    patternBoundsMin: { value: b.min.clone() },
+    patternBoundsSize: { value: b.size.clone() },
   }
 }
 
-export function createPatternShaderMaterial(options: PatternMaterialOptions): ShaderMaterial {
-  const material = new ShaderMaterial({
-    vertexShader,
-    fragmentShader,
-    uniforms: buildUniforms(options),
-    side: DoubleSide,
-  })
-  material.userData.isPatternMaterial = true
+function injectPatternShader(
+  shader: WebGLProgramParametersWithUniforms,
+  uniforms: PatternUniformBag,
+): void {
+  Object.assign(shader.uniforms, uniforms)
+
+  shader.vertexShader = shader.vertexShader.replace(
+    'void main() {',
+    `${PATTERN_VERTEX_PARS}\nvoid main() {`,
+  )
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <project_vertex>',
+    `#include <project_vertex>\n${PATTERN_VERTEX_ASSIGN}`,
+  )
+
+  shader.fragmentShader = shader.fragmentShader.replace(
+    'void main() {',
+    `${PATTERN_FRAGMENT_PARS}\nvoid main() {`,
+  )
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <normal_fragment_maps>',
+    `#include <normal_fragment_maps>\n${PATTERN_BUMP_INJECT}`,
+  )
+}
+
+function attachPatternHooks(material: Material, options: PatternMaterialOptions): Material {
+  if (!isStandardCompatibleMaterial(material)) {
+    return material
+  }
+
+  const uniforms = buildUniforms(options)
+  material.userData.patternUniforms = uniforms
+  material.side = DoubleSide
+  material.customProgramCacheKey = () =>
+    `pattern:v3:${options.mappingMode}:${options.settings.mode}:${options.settings.patternId ?? 'none'}`
+
+  material.onBeforeCompile = (shader) => {
+    injectPatternShader(shader, material.userData.patternUniforms as PatternUniformBag)
+  }
+
+  material.needsUpdate = true
   return material
 }
 
-export function updatePatternShaderMaterial(
-  material: ShaderMaterial,
-  options: PatternMaterialOptions,
-): void {
+export function createPatternShaderMaterial(options: PatternMaterialOptions): Material {
+  const material = cloneBaseMaterial(options.baseMaterial)
+  ensureVertexColors(material, options.sourceGeometry)
+  material.userData.isPatternMaterial = true
+
+  if (isStandardCompatibleMaterial(material)) {
+    return attachPatternHooks(material, options)
+  }
+
+  // Fallback for uncommon material types — flat shading with preserved diffuse color.
+  const fallback = new MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.55,
+    metalness: 0.15,
+  })
+  ensureVertexColors(fallback, options.sourceGeometry)
+  fallback.userData.isPatternMaterial = true
+  return attachPatternHooks(fallback, options)
+}
+
+export function updatePatternShaderMaterial(material: Material, options: PatternMaterialOptions): void {
   const patternId = options.settings.patternId
   if (!patternId) return
 
   const next = buildUniforms(options)
-  for (const [key, uniform] of Object.entries(next)) {
-    const existing = material.uniforms[key]
-    if (!existing) continue
-    if (uniform.value instanceof Vector3) existing.value.copy(uniform.value)
-    else if (uniform.value instanceof Vector2) existing.value.copy(uniform.value)
-    else existing.value = uniform.value
+  const existing = material.userData.patternUniforms as PatternUniformBag | undefined
+  if (!existing) {
+    material.userData.patternUniforms = next
+    material.needsUpdate = true
+    return
   }
-  material.needsUpdate = true
+
+  for (const [key, uniform] of Object.entries(next)) {
+    const target = existing[key]
+    if (!target) continue
+    if (uniform.value instanceof Vector3) (target.value as Vector3).copy(uniform.value as Vector3)
+    else if (uniform.value instanceof Vector2) (target.value as Vector2).copy(uniform.value as Vector2)
+    else target.value = uniform.value
+  }
 }
 
 export function buildProjectionForMesh(
@@ -322,7 +335,6 @@ export function buildPatternMaterialOptions(
   stateGeometry: BufferGeometry,
   region: {
     settings: SurfacePatternSettings
-    baseColorHex: number
     normal: Vector3
     anchor: Vector3
     triangleIndices: readonly number[]
@@ -330,8 +342,6 @@ export function buildPatternMaterialOptions(
   },
   baseMaterial: Material,
 ): PatternMaterialOptions {
-  const tint = cloneMaterialWithColor(baseMaterial, region.baseColorHex)
-
   const projection = buildProjectionForMesh(
     mesh,
     region.normal,
@@ -348,8 +358,13 @@ export function buildPatternMaterialOptions(
   return {
     settings: region.settings,
     projection,
-    baseMaterial: tint,
+    baseMaterial,
+    sourceGeometry: stateGeometry,
     mappingMode: region.selectionType,
     bounds,
   }
+}
+
+export function isPatternShaderMaterial(material: Material): material is Material {
+  return material.userData.isPatternMaterial === true
 }

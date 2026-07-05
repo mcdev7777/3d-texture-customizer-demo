@@ -1,4 +1,5 @@
 import type { PatternMode, SurfacePatternSettings } from '../../types/pattern'
+import { DEPTH_MAX, DEPTH_MIN } from '../../types/pattern'
 import { evaluatePattern, smoothstep } from './patternEvaluators'
 
 /** Offset slider range mapped to a fraction of one pattern tile. */
@@ -12,25 +13,30 @@ export const PATTERN_OFFSET_SCALE = 1
 export const BASE_TILE_WORLD = 0.6
 
 /**
- * World displacement (in normalized model units) for one unit of depth level.
- * Models are normalized to a few units across, so the default depth (level 1.0)
- * gives clearly readable relief without deforming the model.
+ * Bump strength at minimum and maximum depth slider values.
+ * Mapped with a smooth curve so low depths stay subtle and max depth reads clearly.
  */
-export const DEPTH_WORLD_PER_LEVEL = 0.11
-export const MAX_DEPTH_LEVEL = 3
+export const DEPTH_BUMP_MIN = 0.15
+export const DEPTH_BUMP_MAX = 3.2
 
-/** Contrast applied to mask values so pattern edges stay crisp. */
-const MASK_CONTRAST = 1.35
+/** @deprecated Legacy linear scale — prefer depthLevelToWorld(). */
+export const DEPTH_WORLD_PER_LEVEL = 0.11
+export const MAX_DEPTH_LEVEL = DEPTH_MAX
 
 export function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value
 }
 
-/** Convert a depth slider level (0.1–3.0) into a safe world-space displacement. */
+/** Convert a depth slider level (0.1–3.0) into shader bump strength. */
 export function depthLevelToWorld(level: number): number {
-  const clamped = Math.min(MAX_DEPTH_LEVEL, Math.max(0, level))
-  return clamped * DEPTH_WORLD_PER_LEVEL
+  const clamped = Math.min(DEPTH_MAX, Math.max(DEPTH_MIN, level))
+  const t = (clamped - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN)
+  const curved = t * t * (3 - 2 * t)
+  return DEPTH_BUMP_MIN + curved * (DEPTH_BUMP_MAX - DEPTH_BUMP_MIN)
 }
+
+/** Contrast applied to mask values so pattern edges stay crisp. */
+const MASK_CONTRAST = 1.35
 
 export function applyContrast(value: number, contrast = MASK_CONTRAST): number {
   return clamp01((value - 0.5) * contrast + 0.5)

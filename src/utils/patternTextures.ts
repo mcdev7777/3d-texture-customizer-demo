@@ -25,9 +25,25 @@ export const PATTERN_DEFINITIONS: PatternDefinition[] = [
 ]
 
 const INK = '#0a0a0a'
-const BG = '#f5f5f5'
+const BG = '#ffffff'
 
-type DrawFn = (ctx: CanvasRenderingContext2D, size: number) => void
+type DrawFn = (ctx: CanvasRenderingContext2D, width: number, height: number) => void
+
+/** Hex/honeycomb tiles use a rectangular period that matches flat-top honeycomb geometry. */
+function getHexTileDimensions(size: number): { width: number; height: number } {
+  const width = size
+  const height = Math.round((size * Math.sqrt(3)) / 4)
+  return { width, height: Math.max(1, height) }
+}
+
+function fill(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  ctx.fillStyle = BG
+  ctx.fillRect(0, 0, width, height)
+  ctx.fillStyle = INK
+  ctx.strokeStyle = INK
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+}
 
 /** Default metadata for an uploaded custom texture (no built-in entry exists). */
 const CUSTOM_PATTERN_DEFINITION: Omit<PatternDefinition, 'id'> = {
@@ -38,32 +54,24 @@ const CUSTOM_PATTERN_DEFINITION: Omit<PatternDefinition, 'id'> = {
   tileable: true,
 }
 
-function fill(ctx: CanvasRenderingContext2D, size: number): void {
-  ctx.fillStyle = BG
-  ctx.fillRect(0, 0, size, size)
-  ctx.fillStyle = INK
-  ctx.strokeStyle = INK
-  ctx.lineJoin = 'round'
-  ctx.lineCap = 'round'
-}
-
 /** Flat-top hex grid metrics sized so `cols` columns span the tile width exactly. */
-function hexGridMetrics(size: number, cols: number) {
-  const r = size / (cols * Math.sqrt(3))
+function hexGridMetrics(width: number, cols: number) {
+  const r = width / (cols * Math.sqrt(3))
   return { r, w: Math.sqrt(3) * r, h: 1.5 * r, cols }
 }
 
 /** Draw a flat-top hex grid that tiles seamlessly left/right and top/bottom. */
 function drawSeamlessHexGrid(
   ctx: CanvasRenderingContext2D,
-  size: number,
+  width: number,
+  height: number,
   cols: number,
   lineWidthRatio: number,
   radiusScale = 1,
 ): void {
-  const { r, w, h } = hexGridMetrics(size, cols)
-  ctx.lineWidth = size * lineWidthRatio
-  const rowCount = Math.ceil(size / h) + 2
+  const { r, w, h } = hexGridMetrics(width, cols)
+  ctx.lineWidth = width * lineWidthRatio
+  const rowCount = Math.ceil(height / h) + 2
   for (let row = -1; row < rowCount; row++) {
     const cy = row * h
     const colOffset = row % 2 ? w / 2 : 0
@@ -73,29 +81,29 @@ function drawSeamlessHexGrid(
       ctx.stroke()
     }
   }
-  enforceTileWrap(ctx, size)
+  enforceTileWrap(ctx, width, height)
 }
 
 /** Copy inner edge pixels to the outer border so RepeatWrapping has no seam. */
-function enforceTileWrap(ctx: CanvasRenderingContext2D, size: number): void {
-  const imageData = ctx.getImageData(0, 0, size, size)
+function enforceTileWrap(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  const imageData = ctx.getImageData(0, 0, width, height)
   const d = imageData.data
-  const rowBytes = size * 4
+  const rowBytes = width * 4
 
-  for (let y = 0; y < size; y++) {
+  for (let y = 0; y < height; y++) {
     const row = y * rowBytes
     for (let c = 0; c < 4; c++) {
       d[row + c] = d[row + 4 + c]
-      d[row + (size - 1) * 4 + c] = d[row + (size - 2) * 4 + c]
+      d[row + (width - 1) * 4 + c] = d[row + (width - 2) * 4 + c]
     }
   }
 
-  for (let x = 0; x < size; x++) {
+  for (let x = 0; x < width; x++) {
     for (let c = 0; c < 4; c++) {
       const top = x * 4 + c
-      const bottom = (size - 1) * rowBytes + x * 4 + c
+      const bottom = (height - 1) * rowBytes + x * 4 + c
       d[top] = d[rowBytes + x * 4 + c]
-      d[bottom] = d[(size - 2) * rowBytes + x * 4 + c]
+      d[bottom] = d[(height - 2) * rowBytes + x * 4 + c]
     }
   }
 
@@ -105,9 +113,8 @@ function enforceTileWrap(ctx: CanvasRenderingContext2D, size: number): void {
 /** UV aspect correction for patterns whose vertical repeat period differs from horizontal. */
 export function getPatternTileAspect(patternId: PatternId): { u: number; v: number } {
   if (patternId === 'hex' || patternId === 'honeycomb') {
-    const cols = 4
-    const rowPairs = 2
-    return { u: 1, v: (rowPairs * 3) / (cols * Math.sqrt(3)) }
+    const { width, height } = getHexTileDimensions(512)
+    return { u: 1, v: width / height }
   }
   return { u: 1, v: 1 }
 }
@@ -125,68 +132,69 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
 }
 
 const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
-  hex(ctx, size) {
-    fill(ctx, size)
-    drawSeamlessHexGrid(ctx, size, 4, 0.028, 0.98)
+  hex(ctx, width, height) {
+    fill(ctx, width, height)
+    drawSeamlessHexGrid(ctx, width, height, 4, 0.028, 0.98)
   },
 
-  grid(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.028
-    const step = size / 8
-    for (let x = 0; x <= size; x += step) {
+  grid(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.028
+    const step = width / 8
+    for (let x = 0; x <= width; x += step) {
       ctx.beginPath()
       ctx.moveTo(x, 0)
-      ctx.lineTo(x, size)
+      ctx.lineTo(x, height)
       ctx.stroke()
     }
-    for (let y = 0; y <= size; y += step) {
+    for (let y = 0; y <= height; y += step) {
       ctx.beginPath()
       ctx.moveTo(0, y)
-      ctx.lineTo(size, y)
+      ctx.lineTo(width, y)
       ctx.stroke()
     }
-    enforceTileWrap(ctx, size)
+    enforceTileWrap(ctx, width, height)
   },
 
-  diamond(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.032
-    const step = size / 5
+  diamond(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.028
+    const step = width / (4 * Math.sqrt(2))
+    const extent = width * Math.sqrt(2)
     ctx.save()
-    ctx.translate(size / 2, size / 2)
+    ctx.translate(width / 2, height / 2)
     ctx.rotate(Math.PI / 4)
-    ctx.translate(-size / 2, -size / 2)
-    for (let x = -size; x <= size * 2; x += step) {
+    for (let x = -extent; x <= extent; x += step) {
       ctx.beginPath()
-      ctx.moveTo(x, -size)
-      ctx.lineTo(x, size * 2)
+      ctx.moveTo(x, -extent)
+      ctx.lineTo(x, extent)
       ctx.stroke()
     }
-    for (let y = -size; y <= size * 2; y += step) {
+    for (let y = -extent; y <= extent; y += step) {
       ctx.beginPath()
-      ctx.moveTo(-size, y)
-      ctx.lineTo(size * 2, y)
+      ctx.moveTo(-extent, y)
+      ctx.lineTo(extent, y)
       ctx.stroke()
     }
     ctx.restore()
+    enforceTileWrap(ctx, width, height)
   },
 
-  honeycomb(ctx, size) {
-    fill(ctx, size)
-    drawSeamlessHexGrid(ctx, size, 4, 0.032, 0.96)
+  honeycomb(ctx, width, height) {
+    fill(ctx, width, height)
+    drawSeamlessHexGrid(ctx, width, height, 4, 0.032, 0.96)
   },
 
-  scales(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.032
+  scales(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.032
     const cols = 6
-    const step = size / cols
+    const step = width / cols
     const r = step * 0.62
-    for (let row = -1; row * (step * 0.6) < size + step; row++) {
+    for (let row = -1; row * (step * 0.6) < height + step; row++) {
       const offset = row % 2 ? step / 2 : 0
       const cy = row * step * 0.6
-      for (let col = -1; col * step < size + step; col++) {
+      for (let col = -1; col * step < width + step; col++) {
         const cx = col * step + offset
         ctx.beginPath()
         ctx.arc(cx, cy, r, 0, Math.PI)
@@ -195,40 +203,40 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
     }
   },
 
-  ribbed(ctx, size) {
-    fill(ctx, size)
+  ribbed(ctx, width, height) {
+    fill(ctx, width, height)
     const bars = 8
-    const step = size / bars
+    const step = height / bars
     for (let i = 0; i < bars; i++) {
-      ctx.fillRect(0, i * step + step * 0.22, size, step * 0.56)
+      ctx.fillRect(0, i * step + step * 0.22, width, step * 0.56)
     }
-    enforceTileWrap(ctx, size)
+    enforceTileWrap(ctx, width, height)
   },
 
-  dots(ctx, size) {
-    fill(ctx, size)
-    const step = size / 8
+  dots(ctx, width, height) {
+    fill(ctx, width, height)
+    const step = width / 8
     const r = step * 0.28
-    for (let y = step / 2; y < size; y += step) {
-      for (let x = step / 2; x < size; x += step) {
+    for (let y = step / 2; y < height; y += step) {
+      for (let x = step / 2; x < width; x += step) {
         ctx.beginPath()
         ctx.arc(x, y, r, 0, Math.PI * 2)
         ctx.fill()
       }
     }
-    enforceTileWrap(ctx, size)
+    enforceTileWrap(ctx, width, height)
   },
 
-  waves(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.03
+  waves(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.03
     const rows = 6
-    const amp = size * 0.06
-    const freq = (Math.PI * 2 * 2) / size
+    const amp = height * 0.06
+    const freq = (Math.PI * 2 * 2) / width
     for (let row = 0; row <= rows; row++) {
-      const yBase = (row / rows) * size
+      const yBase = (row / rows) * height
       ctx.beginPath()
-      for (let x = 0; x <= size; x += 2) {
+      for (let x = 0; x <= width; x += 2) {
         const y = yBase + Math.sin(x * freq) * amp
         if (x === 0) ctx.moveTo(x, y)
         else ctx.lineTo(x, y)
@@ -237,17 +245,17 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
     }
   },
 
-  zigzag(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.03
+  zigzag(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.03
     const rows = 6
-    const step = size / rows
+    const step = width / rows
     const peak = step * 0.5
     for (let row = 0; row <= rows; row++) {
-      const yBase = row * step
+      const yBase = (row / rows) * height
       ctx.beginPath()
       let up = true
-      for (let x = 0; x <= size; x += step) {
+      for (let x = 0; x <= width; x += step) {
         const y = yBase + (up ? -peak : peak)
         if (x === 0) ctx.moveTo(x, y)
         else ctx.lineTo(x, y)
@@ -257,20 +265,20 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
     }
   },
 
-  brick(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.022
+  brick(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.022
     const rows = 6
-    const rowH = size / rows
-    const brickW = size / 3
+    const rowH = height / rows
+    const brickW = width / 3
     for (let row = 0; row < rows; row++) {
       const y = row * rowH
       ctx.beginPath()
       ctx.moveTo(0, y)
-      ctx.lineTo(size, y)
+      ctx.lineTo(width, y)
       ctx.stroke()
       const offset = row % 2 ? brickW / 2 : 0
-      for (let x = offset; x <= size; x += brickW) {
+      for (let x = offset; x <= width; x += brickW) {
         ctx.beginPath()
         ctx.moveTo(x, y)
         ctx.lineTo(x, y + rowH)
@@ -279,25 +287,26 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
     }
   },
 
-  crosshatch(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.028
-    const step = size / 7
-    for (let i = -size; i < size * 2; i += step) {
+  crosshatch(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.028
+    const step = width / 8
+    for (let i = -width; i < width * 2; i += step) {
       ctx.beginPath()
       ctx.moveTo(i, 0)
-      ctx.lineTo(i + size, size)
+      ctx.lineTo(i + width, height)
       ctx.stroke()
       ctx.beginPath()
-      ctx.moveTo(i, size)
-      ctx.lineTo(i + size, 0)
+      ctx.moveTo(i, height)
+      ctx.lineTo(i + width, 0)
       ctx.stroke()
     }
+    enforceTileWrap(ctx, width, height)
   },
 
-  cracks(ctx, size) {
-    fill(ctx, size)
-    ctx.lineWidth = size * 0.02
+  cracks(ctx, width, height) {
+    fill(ctx, width, height)
+    ctx.lineWidth = width * 0.02
     const nodes = 9
     const seeds: Array<[number, number]> = []
     let s = 1337
@@ -306,15 +315,15 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
       return s / 0x7fffffff
     }
     for (let i = 0; i < nodes; i++) {
-      seeds.push([rand() * size, rand() * size])
+      seeds.push([rand() * width, rand() * height])
     }
     for (let i = 0; i < seeds.length; i++) {
       const [x0, y0] = seeds[i]
       const branches = 2 + Math.floor(rand() * 2)
       for (let b = 0; b < branches; b++) {
         const target = seeds[(i + 1 + b) % seeds.length]
-        const midX = (x0 + target[0]) / 2 + (rand() - 0.5) * size * 0.2
-        const midY = (y0 + target[1]) / 2 + (rand() - 0.5) * size * 0.2
+        const midX = (x0 + target[0]) / 2 + (rand() - 0.5) * width * 0.2
+        const midY = (y0 + target[1]) / 2 + (rand() - 0.5) * height * 0.2
         ctx.beginPath()
         ctx.moveTo(x0, y0)
         ctx.quadraticCurveTo(midX, midY, target[0], target[1])
@@ -394,19 +403,26 @@ export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasEl
   if (custom) return custom
 
   const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
+  let width = size
+  let height = size
+  if (patternId === 'hex' || patternId === 'honeycomb') {
+    const dims = getHexTileDimensions(size)
+    width = dims.width
+    height = dims.height
+  }
+  canvas.width = width
+  canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D unavailable')
 
   if (isBuiltinPattern(patternId)) {
-    PATTERN_DRAWERS[patternId](ctx, size)
+    PATTERN_DRAWERS[patternId](ctx, width, height)
     return canvas
   }
 
   // Unknown id (e.g. removed custom texture) — neutral flat mask, not a wrong pattern.
   ctx.fillStyle = '#f5f5f5'
-  ctx.fillRect(0, 0, size, size)
+  ctx.fillRect(0, 0, width, height)
   return canvas
 }
 
@@ -421,13 +437,16 @@ export function getPatternImageData(patternId: PatternId, size = 512): ImageData
   return ctx?.getImageData(0, 0, canvas.width, canvas.height) ?? null
 }
 
+const THUMBNAIL_CACHE_VERSION = 'v4'
+
 export function createPatternThumbnail(patternId: PatternId): string {
-  const cached = thumbnailCache.get(patternId)
+  const cacheKey = `${patternId}@${THUMBNAIL_CACHE_VERSION}`
+  const cached = thumbnailCache.get(cacheKey)
   if (cached) return cached
 
   const canvas = getPatternCanvas(patternId, 96)
   const url = canvas.toDataURL('image/png')
-  thumbnailCache.set(patternId, url)
+  thumbnailCache.set(cacheKey, url)
   return url
 }
 
