@@ -3,6 +3,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 interface Props {
   children: ReactNode
   fallback: ReactNode
+  resetKey?: string
 }
 
 interface State {
@@ -18,6 +19,12 @@ export class ViewerErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('Viewer error:', error, info.componentStack)
+  }
+
+  componentDidUpdate(prevProps: Props): void {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false })
+    }
   }
 
   render() {

@@ -3,7 +3,9 @@ import {
   DoubleSide,
   Float32BufferAttribute,
   MeshBasicMaterial,
+  MeshLambertMaterial,
   MeshPhongMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   ShaderMaterial,
   Vector2,
@@ -187,10 +189,17 @@ export interface PatternMaterialOptions {
 }
 
 function cloneMaterialWithColor(material: Material, colorHex: number): Material {
-  const clone = material.clone()
+  let clone: Material
+  try {
+    clone = material.clone()
+  } catch {
+    clone = new MeshStandardMaterial()
+  }
   if (
     clone instanceof MeshStandardMaterial ||
+    clone instanceof MeshPhysicalMaterial ||
     clone instanceof MeshPhongMaterial ||
+    clone instanceof MeshLambertMaterial ||
     clone instanceof MeshBasicMaterial
   ) {
     clone.color.setHex(colorHex)
