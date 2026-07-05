@@ -97,9 +97,9 @@ export function BakeExportPanel() {
         </div>
 
         <p className="text-[10px] text-slate-500">
-          Apply turns the pattern into real relief on the surface. Emboss raises it, engrave
-          recesses it. The surface keeps its original color. Works on a single surface or a whole
-          part.
+          Apply replaces the surface color with the pattern. Depth controls bump shadows
+          around black areas — not color darkness. Part mode maps all faces; surface mode
+          maps the selected face only.
         </p>
 
         <div className="pt-2 border-t border-purple-500/10">

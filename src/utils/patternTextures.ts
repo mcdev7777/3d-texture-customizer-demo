@@ -24,8 +24,8 @@ export const PATTERN_DEFINITIONS: PatternDefinition[] = [
   { id: 'cracks', label: 'Cracks', category: 'surface', defaultScale: 1.2, defaultDepth: 1.4, tileable: false },
 ]
 
-const INK = '#f4f4f8'
-const BG = '#0c0c12'
+const INK = '#0a0a0a'
+const BG = '#f5f5f5'
 
 type DrawFn = (ctx: CanvasRenderingContext2D, size: number) => void
 
@@ -47,6 +47,71 @@ function fill(ctx: CanvasRenderingContext2D, size: number): void {
   ctx.lineCap = 'round'
 }
 
+/** Flat-top hex grid metrics sized so `cols` columns span the tile width exactly. */
+function hexGridMetrics(size: number, cols: number) {
+  const r = size / (cols * Math.sqrt(3))
+  return { r, w: Math.sqrt(3) * r, h: 1.5 * r, cols }
+}
+
+/** Draw a flat-top hex grid that tiles seamlessly left/right and top/bottom. */
+function drawSeamlessHexGrid(
+  ctx: CanvasRenderingContext2D,
+  size: number,
+  cols: number,
+  lineWidthRatio: number,
+  radiusScale = 1,
+): void {
+  const { r, w, h } = hexGridMetrics(size, cols)
+  ctx.lineWidth = size * lineWidthRatio
+  const rowCount = Math.ceil(size / h) + 2
+  for (let row = -1; row < rowCount; row++) {
+    const cy = row * h
+    const colOffset = row % 2 ? w / 2 : 0
+    for (let col = -1; col <= cols; col++) {
+      const cx = col * w + colOffset
+      hexPath(ctx, cx, cy, r * radiusScale)
+      ctx.stroke()
+    }
+  }
+  enforceTileWrap(ctx, size)
+}
+
+/** Copy inner edge pixels to the outer border so RepeatWrapping has no seam. */
+function enforceTileWrap(ctx: CanvasRenderingContext2D, size: number): void {
+  const imageData = ctx.getImageData(0, 0, size, size)
+  const d = imageData.data
+  const rowBytes = size * 4
+
+  for (let y = 0; y < size; y++) {
+    const row = y * rowBytes
+    for (let c = 0; c < 4; c++) {
+      d[row + c] = d[row + 4 + c]
+      d[row + (size - 1) * 4 + c] = d[row + (size - 2) * 4 + c]
+    }
+  }
+
+  for (let x = 0; x < size; x++) {
+    for (let c = 0; c < 4; c++) {
+      const top = x * 4 + c
+      const bottom = (size - 1) * rowBytes + x * 4 + c
+      d[top] = d[rowBytes + x * 4 + c]
+      d[bottom] = d[(size - 2) * rowBytes + x * 4 + c]
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0)
+}
+
+/** UV aspect correction for patterns whose vertical repeat period differs from horizontal. */
+export function getPatternTileAspect(patternId: PatternId): { u: number; v: number } {
+  if (patternId === 'hex' || patternId === 'honeycomb') {
+    const cols = 4
+    const rowPairs = 2
+    return { u: 1, v: (rowPairs * 3) / (cols * Math.sqrt(3)) }
+  }
+  return { u: 1, v: 1 }
+}
+
 function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
   ctx.beginPath()
   for (let i = 0; i < 6; i++) {
@@ -62,24 +127,13 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
 const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
   hex(ctx, size) {
     fill(ctx, size)
-    ctx.lineWidth = size * 0.03
-    const r = size / 6
-    const w = r * Math.sqrt(3)
-    const h = r * 1.5
-    for (let row = -1; row * h < size + h; row++) {
-      for (let col = -1; col * w < size + w; col++) {
-        const cx = col * w + (row % 2 ? w / 2 : 0)
-        const cy = row * h
-        hexPath(ctx, cx, cy, r)
-        ctx.stroke()
-      }
-    }
+    drawSeamlessHexGrid(ctx, size, 4, 0.028, 0.98)
   },
 
   grid(ctx, size) {
     fill(ctx, size)
-    ctx.lineWidth = size * 0.03
-    const step = size / 6
+    ctx.lineWidth = size * 0.028
+    const step = size / 8
     for (let x = 0; x <= size; x += step) {
       ctx.beginPath()
       ctx.moveTo(x, 0)
@@ -92,6 +146,7 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
       ctx.lineTo(size, y)
       ctx.stroke()
     }
+    enforceTileWrap(ctx, size)
   },
 
   diamond(ctx, size) {
@@ -119,17 +174,7 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
 
   honeycomb(ctx, size) {
     fill(ctx, size)
-    const r = size / 6
-    const w = r * Math.sqrt(3)
-    const h = r * 1.5
-    for (let row = -1; row * h < size + h; row++) {
-      for (let col = -1; col * w < size + w; col++) {
-        const cx = col * w + (row % 2 ? w / 2 : 0)
-        const cy = row * h
-        hexPath(ctx, cx, cy, r * 0.92)
-        ctx.fill()
-      }
-    }
+    drawSeamlessHexGrid(ctx, size, 4, 0.032, 0.96)
   },
 
   scales(ctx, size) {
@@ -152,17 +197,18 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
 
   ribbed(ctx, size) {
     fill(ctx, size)
-    const bars = 7
+    const bars = 8
     const step = size / bars
     for (let i = 0; i < bars; i++) {
-      ctx.fillRect(0, i * step + step * 0.2, size, step * 0.6)
+      ctx.fillRect(0, i * step + step * 0.22, size, step * 0.56)
     }
+    enforceTileWrap(ctx, size)
   },
 
   dots(ctx, size) {
     fill(ctx, size)
-    const step = size / 7
-    const r = step * 0.3
+    const step = size / 8
+    const r = step * 0.28
     for (let y = step / 2; y < size; y += step) {
       for (let x = step / 2; x < size; x += step) {
         ctx.beginPath()
@@ -170,6 +216,7 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
         ctx.fill()
       }
     }
+    enforceTileWrap(ctx, size)
   },
 
   waves(ctx, size) {

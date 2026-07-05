@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { BakeStatus, ExportFormat } from '../types/bake'
-import { commitGeometry, resetAllGeometries } from '../lib/geometry/bakeInPlace'
+import { commitPatternMaterial, resetAllPatterns } from '../lib/materials/patternMaterialApply'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { useAppStore } from './useAppStore'
@@ -58,7 +58,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
         return false
       }
 
-      commitGeometry(sourceMesh, selected, entry.settings)
+      commitPatternMaterial(sourceMesh, selected, entry.settings)
 
       const committedSurfaceIds = get().committedSurfaceIds.includes(selected.surfaceId)
         ? get().committedSurfaceIds
@@ -86,7 +86,7 @@ export const useBakeStore = create<BakeState>((set, get) => ({
 
   resetAll: () => {
     const loadedModel = useAppStore.getState().loadedModel
-    resetAllGeometries(loadedModel?.object ?? null)
+    resetAllPatterns(loadedModel?.object ?? null)
     set({
       status: 'idle',
       committedSurfaceIds: [],

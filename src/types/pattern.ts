@@ -30,7 +30,7 @@ export interface SurfacePatternSettings {
   rotation: number
   offsetX: number
   offsetY: number
-  /** Depth level (0.1–3.0). Converted to world displacement when baking. */
+  /** Depth level (0.1–3.0). Controls bump emphasis on pattern-black regions. */
   depth: number
   opacity: number
 }
