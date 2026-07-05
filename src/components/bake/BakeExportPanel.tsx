@@ -25,7 +25,7 @@ export function BakeExportPanel() {
   const appliedCount = committedSurfaceIds.length
   const hasApplied = appliedCount > 0
 
-  const isBusy = status === 'applying' || status === 'exporting'
+  const isBusy = status === 'applying'
 
   const statusText = isBusy
     ? status === 'applying'
