@@ -9,7 +9,7 @@ import { buildSelectedSurfaceGeometry } from './buildSelectedSurfaceGeometry'
 import { computeSurfaceArea } from './computeTriangleArea'
 import { getSurfaceId } from './getSurfaceId'
 import { getMeshPatternPristineGeometry } from '../materials/meshPatternRegistry'
-import { mapLiveFaceIndexToPristine } from './mapFaceToPristine'
+import { mapPristineFaceIndexToLive } from './mapFaceToPristine'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 
 const _point = new Vector3()
@@ -127,16 +127,12 @@ export function buildSelectedSurfaceFromId(
 
   const selectionMode = selectionModeForSurfaceId(parsed.faceIndex)
   const pristine = getMeshPatternPristineGeometry(mesh)
+  const indexGeo = pristine ?? mesh.geometry
+  // surfaceId encodes a pristine face index — do not treat it as a live mesh index.
   const seedFace =
     selectionMode === 'part'
       ? 0
-      : pristine
-        ? mapLiveFaceIndexToPristine(
-            mesh,
-            pristine,
-            clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry)),
-          )
-        : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
+      : clampFaceIndex(parsed.faceIndex, getTriangleCount(indexGeo))
 
   return buildSurfaceFromPick(mesh, seedFace, selectionMode, modelRoot)
 }
@@ -156,31 +152,26 @@ export function restoreSurfaceSelection(surfaceId: string | undefined, modelRoot
     useSurfaceSelectionStore.setState({ selectionMode: 'part' })
   }
 
-  const seedFace =
+  const pristine = getMeshPatternPristineGeometry(mesh)
+  const indexGeo = pristine ?? mesh.geometry
+  const pristineFace =
     selectionMode === 'part'
       ? 0
-      : (() => {
-          const pristine = getMeshPatternPristineGeometry(mesh)
-          if (pristine) {
-            return mapLiveFaceIndexToPristine(
-              mesh,
-              pristine,
-              clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry)),
-            )
-          }
-          return clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
-        })()
+      : clampFaceIndex(parsed.faceIndex, getTriangleCount(indexGeo))
 
-  getFaceWorldCenter(mesh, seedFace, getMeshPatternPristineGeometry(mesh) ?? mesh.geometry, _point)
-  const indexGeo = getMeshPatternPristineGeometry(mesh) ?? mesh.geometry
-  const normal = computeFaceNormal(indexGeo, seedFace, mesh)
+  getFaceWorldCenter(mesh, pristineFace, indexGeo, _point)
+  const normal = computeFaceNormal(indexGeo, pristineFace, mesh)
+
+  const liveFace =
+    selectionMode === 'part'
+      ? pristineFace
+      : pristine
+        ? mapPristineFaceIndexToLive(mesh, pristine, parsed.faceIndex)
+        : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
 
   useSurfaceSelectionStore.getState().selectFromPick({
     mesh,
-    faceIndex:
-      selectionMode === 'part'
-        ? seedFace
-        : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry)),
+    faceIndex: liveFace,
     point: _point.clone(),
     normal,
   })

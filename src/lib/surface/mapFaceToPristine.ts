@@ -1,6 +1,7 @@
 import type { BufferGeometry, Mesh } from 'three'
 import { getTriangleVertexIndices } from './computeFaceNormal'
 import { getTriangleCount } from './geometryKeys'
+import { clampFaceIndex } from './meshUtils'
 
 function sortedVertexKey(a: number, b: number, c: number): string {
   const sorted = [a, b, c].sort((x, y) => x - y)
@@ -28,4 +29,17 @@ export function mapLiveFaceIndexToPristine(
   const key = sortedVertexKey(ia, ib, ic)
   const lookup = buildVertexTripleLookup(pristineGeometry)
   return lookup.get(key) ?? liveFaceIndex
+}
+
+/** Map a pristine triangle index to the matching triangle on the live mesh geometry. */
+export function mapPristineFaceIndexToLive(
+  mesh: Mesh,
+  pristineGeometry: BufferGeometry,
+  pristineFaceIndex: number,
+): number {
+  const clamped = clampFaceIndex(pristineFaceIndex, getTriangleCount(pristineGeometry))
+  const [ia, ib, ic] = getTriangleVertexIndices(pristineGeometry, clamped)
+  const key = sortedVertexKey(ia, ib, ic)
+  const lookup = buildVertexTripleLookup(mesh.geometry)
+  return lookup.get(key) ?? clamped
 }

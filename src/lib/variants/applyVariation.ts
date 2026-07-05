@@ -48,7 +48,7 @@ export function applyVariation(
 
     try {
       commitPatternMaterial(mesh, modelRoot, surface, entry.settings)
-      appliedCommitted.push(surfaceId)
+      appliedCommitted.push(surface.surfaceId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Apply failed.'
       throw new Error(`Could not apply variation: ${message}`)
