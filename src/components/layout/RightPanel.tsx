@@ -10,7 +10,6 @@ import { PatternLibraryPanel } from '../pattern/PatternLibraryPanel'
 import { PatternControlsPanel } from '../pattern/PatternControlsPanel'
 import { BakeExportPanel } from '../bake/BakeExportPanel'
 import { ExportModelPanel } from '../bake/ExportModelPanel'
-import { VariationsPanel } from '../bake/VariationsPanel'
 
 function StatRow({ label, value }: { label: string; value: string | number }) {
   return (
@@ -71,7 +70,6 @@ export function RightPanel() {
 
       <BakeExportPanel />
       <ExportModelPanel />
-      <VariationsPanel />
 
       <Panel title="Viewer">
         <div className="grid grid-cols-2 gap-2 mb-3">

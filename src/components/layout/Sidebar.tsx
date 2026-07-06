@@ -3,7 +3,6 @@ import {
   MousePointerClick,
   Grid3x3,
   Layers,
-  Bookmark,
   Box,
   Download,
 } from 'lucide-react'
@@ -29,7 +28,6 @@ export function Sidebar() {
     { id: 'library', label: 'Texture Library', icon: Grid3x3, target: 'patterns-panel' },
     { id: 'apply', label: 'Apply Texture', icon: Layers, target: 'texture-panel' },
     { id: 'export', label: 'Export Model', icon: Download, target: 'export-panel' },
-    { id: 'variations', label: 'Variations', icon: Bookmark, target: 'variations-panel' },
   ]
 
   return (
