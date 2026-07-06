@@ -18,9 +18,13 @@ export function normalizeModel(object: Object3D): NormalizedModel {
   const size = box.getSize(new Vector3())
   const maxDim = Math.max(size.x, size.y, size.z, 0.001)
 
-  const wrapper = new Group()
-  object.position.sub(center)
+  // Center on X/Z and sit the bottom on the floor grid (y = 0).
+  object.position.x -= center.x
+  object.position.z -= center.z
+  object.position.y -= box.min.y
   object.updateMatrixWorld(true)
+
+  const wrapper = new Group()
   wrapper.add(object)
 
   const scale = TARGET_SIZE / maxDim
