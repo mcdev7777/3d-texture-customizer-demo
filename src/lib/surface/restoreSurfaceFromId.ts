@@ -1,4 +1,4 @@
-import { Vector3, type Mesh, type Object3D } from 'three'
+import { Vector3, type BufferGeometry, type Mesh, type Object3D } from 'three'
 import type { SelectedSurface, SelectionMode } from '../../types/surfaceSelection'
 import { computeFaceNormal, getTriangleVertexIndices } from './computeFaceNormal'
 import { clampFaceIndex, isMeshInModel } from './meshUtils'
@@ -8,6 +8,8 @@ import { getAllMeshFaces, getFacesByAngle } from './selectByAngle'
 import { buildSelectedSurfaceGeometry } from './buildSelectedSurfaceGeometry'
 import { computeSurfaceArea } from './computeTriangleArea'
 import { getSurfaceId } from './getSurfaceId'
+import { getMeshPatternPristineGeometry } from '../materials/meshPatternRegistry'
+import { mapLiveFaceIndexToPristine } from './mapFaceToPristine'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 
 const _point = new Vector3()
@@ -31,11 +33,15 @@ export function findMeshByUuid(root: Object3D, uuid: string): Mesh | null {
   return found
 }
 
-function getFaceWorldCenter(mesh: Mesh, faceIndex: number, target: Vector3): void {
-  const geometry = mesh.geometry
-  const position = geometry.getAttribute('position')
-  const clamped = clampFaceIndex(faceIndex, getTriangleCount(geometry))
-  const [ia, ib, ic] = getTriangleVertexIndices(geometry, clamped)
+function getFaceWorldCenter(
+  mesh: Mesh,
+  faceIndex: number,
+  sourceGeometry: BufferGeometry,
+  target: Vector3,
+): void {
+  const position = sourceGeometry.getAttribute('position')
+  const clamped = clampFaceIndex(faceIndex, getTriangleCount(sourceGeometry))
+  const [ia, ib, ic] = getTriangleVertexIndices(sourceGeometry, clamped)
 
   target.set(0, 0, 0)
   for (const index of [ia, ib, ic]) {
@@ -61,16 +67,17 @@ function buildSurfaceFromPick(
 
   mesh.updateWorldMatrix(true, false)
   const geometry = mesh.geometry
-  const triangleCount = getTriangleCount(geometry)
-  const clampedFace = clampFaceIndex(faceIndex, triangleCount)
+  const pristineGeometry = getMeshPatternPristineGeometry(mesh)
+  const indexGeometry = pristineGeometry ?? geometry
+  const clampedFace = clampFaceIndex(faceIndex, getTriangleCount(indexGeometry))
 
   let triangleIndices: number[]
   if (selectionMode === 'part') {
-    triangleIndices = getAllMeshFaces(geometry)
+    triangleIndices = getAllMeshFaces(indexGeometry)
   } else if (connectedOnly) {
-    triangleIndices = getConnectedCoplanarSurface(geometry, mesh, clampedFace, angleTolerance)
+    triangleIndices = getConnectedCoplanarSurface(indexGeometry, mesh, clampedFace, angleTolerance)
   } else {
-    triangleIndices = getFacesByAngle(geometry, mesh, clampedFace, angleTolerance)
+    triangleIndices = getFacesByAngle(indexGeometry, mesh, clampedFace, angleTolerance)
   }
 
   const highlightGeometry = buildSelectedSurfaceGeometry(
@@ -84,9 +91,9 @@ function buildSurfaceFromPick(
     return null
   }
 
-  getFaceWorldCenter(mesh, clampedFace, _point)
-  const normal = computeFaceNormal(geometry, clampedFace, mesh)
-  const area = computeSurfaceArea(geometry, mesh, triangleIndices)
+  getFaceWorldCenter(mesh, clampedFace, indexGeometry, _point)
+  const normal = computeFaceNormal(indexGeometry, clampedFace, mesh)
+  const area = computeSurfaceArea(indexGeometry, mesh, triangleIndices)
   const surfaceId =
     selectionMode === 'part'
       ? getSurfaceId(mesh.uuid, -1)
@@ -119,10 +126,17 @@ export function buildSelectedSurfaceFromId(
   if (!mesh || !isMeshInModel(mesh, modelRoot)) return null
 
   const selectionMode = selectionModeForSurfaceId(parsed.faceIndex)
+  const pristine = getMeshPatternPristineGeometry(mesh)
   const seedFace =
     selectionMode === 'part'
       ? 0
-      : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
+      : pristine
+        ? mapLiveFaceIndexToPristine(
+            mesh,
+            pristine,
+            clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry)),
+          )
+        : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
 
   return buildSurfaceFromPick(mesh, seedFace, selectionMode, modelRoot)
 }
@@ -145,14 +159,28 @@ export function restoreSurfaceSelection(surfaceId: string | undefined, modelRoot
   const seedFace =
     selectionMode === 'part'
       ? 0
-      : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
+      : (() => {
+          const pristine = getMeshPatternPristineGeometry(mesh)
+          if (pristine) {
+            return mapLiveFaceIndexToPristine(
+              mesh,
+              pristine,
+              clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry)),
+            )
+          }
+          return clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry))
+        })()
 
-  getFaceWorldCenter(mesh, seedFace, _point)
-  const normal = computeFaceNormal(mesh.geometry, seedFace, mesh)
+  getFaceWorldCenter(mesh, seedFace, getMeshPatternPristineGeometry(mesh) ?? mesh.geometry, _point)
+  const indexGeo = getMeshPatternPristineGeometry(mesh) ?? mesh.geometry
+  const normal = computeFaceNormal(indexGeo, seedFace, mesh)
 
   useSurfaceSelectionStore.getState().selectFromPick({
     mesh,
-    faceIndex: seedFace,
+    faceIndex:
+      selectionMode === 'part'
+        ? seedFace
+        : clampFaceIndex(parsed.faceIndex, getTriangleCount(mesh.geometry)),
     point: _point.clone(),
     normal,
   })

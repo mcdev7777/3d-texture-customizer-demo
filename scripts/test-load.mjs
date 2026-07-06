@@ -26,7 +26,7 @@ const buffer = readFileSync(filePath)
 const fileName = basename(filePath)
 const ext = fileName.split('.').pop()?.toLowerCase()
 
-async function load(): Promise<Object3D> {
+async function load() {
   const url = `file://${filePath}`
   switch (ext) {
     case 'stl': {
@@ -51,7 +51,7 @@ async function load(): Promise<Object3D> {
   }
 }
 
-function normalize(object: Object3D) {
+function normalize(object) {
   object.updateMatrixWorld(true)
   const box = new Box3().setFromObject(object)
   const center = box.getCenter(new Vector3())

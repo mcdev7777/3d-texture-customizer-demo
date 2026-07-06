@@ -290,6 +290,8 @@ export function createPatternShaderMaterial(options: PatternMaterialOptions): Ma
     return attachPatternHooks(material, options)
   }
 
+  material.dispose()
+
   // Fallback for uncommon material types — flat shading with preserved diffuse color.
   const fallback = new MeshStandardMaterial({
     color: 0xffffff,

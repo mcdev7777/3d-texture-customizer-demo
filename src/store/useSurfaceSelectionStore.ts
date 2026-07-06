@@ -15,6 +15,8 @@ import { buildSelectedSurfaceGeometry } from '../lib/surface/buildSelectedSurfac
 import { getTriangleCount } from '../lib/surface/geometryKeys'
 import { getSurfaceId } from '../lib/surface/getSurfaceId'
 import { clampFaceIndex, isMeshInModel } from '../lib/surface/meshUtils'
+import { getMeshPatternPristineGeometry } from '../lib/materials/meshPatternRegistry'
+import { mapLiveFaceIndexToPristine } from '../lib/surface/mapFaceToPristine'
 
 interface LastPick {
   mesh: Mesh
@@ -65,20 +67,27 @@ function buildSelection(
   mesh.updateWorldMatrix(true, false)
 
   const geometry = mesh.geometry
-  const triangleCount = getTriangleCount(geometry)
-  const clampedFace = clampFaceIndex(faceIndex, triangleCount)
+  const pristineGeometry = getMeshPatternPristineGeometry(mesh)
+  const indexGeometry = pristineGeometry ?? geometry
+  const triangleCount = getTriangleCount(indexGeometry)
+  let clampedFace = clampFaceIndex(faceIndex, getTriangleCount(geometry))
+  if (pristineGeometry) {
+    clampedFace = mapLiveFaceIndexToPristine(mesh, pristineGeometry, clampedFace)
+  } else {
+    clampedFace = clampFaceIndex(clampedFace, triangleCount)
+  }
 
   let triangleIndices: number[]
   if (selectionMode === 'part') {
-    triangleIndices = getAllMeshFaces(geometry)
+    triangleIndices = getAllMeshFaces(indexGeometry)
   } else if (connectedOnly) {
-    triangleIndices = getConnectedCoplanarSurface(geometry, mesh, clampedFace, angleTolerance)
+    triangleIndices = getConnectedCoplanarSurface(indexGeometry, mesh, clampedFace, angleTolerance)
   } else {
-    triangleIndices = getFacesByAngle(geometry, mesh, clampedFace, angleTolerance)
+    triangleIndices = getFacesByAngle(indexGeometry, mesh, clampedFace, angleTolerance)
   }
 
   const highlightGeometry = buildSelectedSurfaceGeometry(
-    geometry,
+    indexGeometry,
     mesh,
     triangleIndices,
     modelRoot,
@@ -89,7 +98,7 @@ function buildSelection(
     return null
   }
 
-  const area = computeSurfaceArea(geometry, mesh, triangleIndices)
+  const area = computeSurfaceArea(indexGeometry, mesh, triangleIndices)
   const surfaceId =
     selectionMode === 'part'
       ? getSurfaceId(mesh.uuid, -1)
@@ -157,7 +166,7 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
       selectedSurface: surface,
       lastPick: {
         mesh: pick.mesh,
-        faceIndex: surface.faceIndex,
+        faceIndex: pick.faceIndex,
         point: pick.point.clone(),
       },
     })

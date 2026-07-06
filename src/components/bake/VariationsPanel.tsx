@@ -113,7 +113,7 @@ export function VariationsPanel() {
   const handleLoad = (variation: ModelVariation) => {
     if (!modelRoot) return
     try {
-      applyVariation(variation, modelRoot)
+      applyVariation(variation, modelRoot, fileName)
       setActiveVariationId(variation.id)
       refresh()
     } catch (err) {

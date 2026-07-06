@@ -137,7 +137,8 @@ export function PatternLibraryPanel() {
         />
 
         <p className="text-[10px] text-slate-500 mb-2">
-          PNG/JPG/WebP used as a height mask — light areas raise, dark areas stay flat.
+          PNG/JPG/WebP used as a height mask — light areas raise, dark areas stay flat. Saved
+          automatically in this browser.
         </p>
 
         {uploadError && <p className="text-[11px] text-red-400 mb-2">{uploadError}</p>}

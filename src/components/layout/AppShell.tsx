@@ -5,30 +5,20 @@ import { BottomStatusBar } from './BottomStatusBar'
 import { ViewerCanvas } from '../viewer/ViewerCanvas'
 import { useAppStore } from '../../store/useAppStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
-import { usePatternStore } from '../../store/usePatternStore'
-import { useBakeStore } from '../../store/useBakeStore'
-import { useCustomTextureStore } from '../../store/useCustomTextureStore'
-import { unloadCurrentModel } from '../../lib/loaders/loadModel'
+import { teardownLoadedModel } from '../../lib/model/teardownModel'
 
 export function AppShell() {
   const loadedModel = useAppStore((s) => s.loadedModel)
 
   useEffect(() => {
     return () => {
-      unloadCurrentModel(useAppStore.getState().loadedModel)
+      teardownLoadedModel(useAppStore.getState().loadedModel)
       useSurfaceSelectionStore.getState().reset()
-      usePatternStore.getState().clearAll()
-      useBakeStore.getState().resetAll()
-      useCustomTextureStore.getState().clearAll()
     }
   }, [])
 
   useEffect(() => {
-    const store = useSurfaceSelectionStore.getState()
-    store.setModelRoot(loadedModel?.object ?? null)
-    store.clearSelection()
-    usePatternStore.getState().clearAll()
-    useBakeStore.getState().resetAll()
+    useSurfaceSelectionStore.getState().setModelRoot(loadedModel?.object ?? null)
   }, [loadedModel?.object.uuid])
 
   return (
