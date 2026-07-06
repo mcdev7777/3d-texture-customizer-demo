@@ -52,6 +52,8 @@ export function BottomStatusBar() {
         <span>LMB — Orbit</span>
         <span className="hidden sm:inline">MMB — Pan</span>
         <span>Scroll — Zoom</span>
+        <span className="hidden md:inline">Shift+click — Add</span>
+        <span className="hidden md:inline">RMB — Clear</span>
       </div>
     </footer>
   )

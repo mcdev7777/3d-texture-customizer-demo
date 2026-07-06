@@ -9,6 +9,8 @@ import { useBakeStore } from '../../store/useBakeStore'
 export function BakeExportPanel() {
   const hasModel = useAppStore((s) => !!s.loadedModel)
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
+  const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
+  const selectionCount = selectedSurfaces.length
   const placements = usePatternStore((s) => s.placements)
 
   const status = useBakeStore((s) => s.status)
@@ -98,8 +100,10 @@ export function BakeExportPanel() {
 
         <p className="text-[10px] text-slate-500">
           Apply adds bump-map shading — the surface color stays the same; pattern detail
-          comes from shadows and highlights. Depth controls relief strength. Part mode
-          maps all faces; surface mode maps the selected face only.
+          comes from shadows and highlights. Depth controls relief strength.
+          {selectionCount > 1
+            ? ` Applies to all ${selectionCount} selected regions at once.`
+            : ' Part mode maps all faces; surface mode maps the selected face only.'}
         </p>
 
         <div className="pt-2 border-t border-purple-500/10">

@@ -30,7 +30,15 @@ import {
   clearMeshPristineRegistry,
 } from './meshPatternRegistry'
 
-const PREVIEW_SURFACE_ID = '__preview__'
+const PREVIEW_PREFIX = '__preview__:'
+
+function previewRegionId(surfaceId: string): string {
+  return `${PREVIEW_PREFIX}${surfaceId}`
+}
+
+function isPreviewRegion(surfaceId: string): boolean {
+  return surfaceId.startsWith(PREVIEW_PREFIX)
+}
 
 export interface PatternRegion {
   surfaceId: string
@@ -277,7 +285,7 @@ export function bakeCommittedPatternsIntoGeometry(
   const state = meshStates.get(mesh.uuid)
   if (!state) return mesh.geometry.clone()
 
-  const committed = state.regions.filter((r) => r.surfaceId !== PREVIEW_SURFACE_ID)
+  const committed = state.regions.filter((r) => !isPreviewRegion(r.surfaceId))
   if (committed.length === 0) return mesh.geometry.clone()
 
   let geometry = ensureIndexedGeometry(state.pristineGeometry.clone())
@@ -356,15 +364,46 @@ export function applyPreviewPattern(
   selectedSurface: SelectedSurface,
   settings: SurfacePatternSettings,
 ): void {
+  syncMeshPreviewPatterns(mesh, modelRoot, [{ surface: selectedSurface, settings }])
+}
+
+export interface MeshPreviewTarget {
+  surface: SelectedSurface
+  settings: SurfacePatternSettings
+}
+
+/** Set all preview regions on one mesh at once (multi-select safe). */
+export function syncMeshPreviewPatterns(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  previews: MeshPreviewTarget[],
+): void {
+  if (previews.length === 0) {
+    removePreviewPattern(mesh, modelRoot)
+    return
+  }
+
   const state = ensureMeshState(mesh)
-  const previewRegion = buildRegion(mesh, selectedSurface, settings, PREVIEW_SURFACE_ID)
-  const committed = state.regions.filter((r) => r.surfaceId !== PREVIEW_SURFACE_ID)
-  rebuildMesh(mesh, modelRoot, [...committed, previewRegion])
+  const committed = state.regions.filter((r) => !isPreviewRegion(r.surfaceId))
+  const seen = new Set<string>()
+  const previewRegions: PatternRegion[] = []
+
+  for (const { surface, settings } of previews) {
+    if (seen.has(surface.surfaceId)) continue
+    seen.add(surface.surfaceId)
+    previewRegions.push(
+      buildRegion(mesh, surface, settings, previewRegionId(surface.surfaceId)),
+    )
+  }
+
+  state.regions = [...committed, ...previewRegions]
+  rebuildMesh(mesh, modelRoot, state.regions)
 }
 
 export function removePreviewPattern(mesh: Mesh, modelRoot: Object3D): void {
   const state = meshStates.get(mesh.uuid)
   if (!state) return
+  state.regions = state.regions.filter((r) => !isPreviewRegion(r.surfaceId))
   rebuildMesh(mesh, modelRoot, state.regions)
 }
 

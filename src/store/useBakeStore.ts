@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { BakeStatus } from '../types/bake'
 import { commitPatternMaterial, resetAllPatterns, uncommitSurfacePattern } from '../lib/materials/patternMaterialApply'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
+import { getPatternTargetSurfaces } from '../lib/pattern/selectionTargets'
 import { useAppStore } from './useAppStore'
 import { usePatternStore } from './usePatternStore'
 import { useSurfaceSelectionStore } from './useSurfaceSelectionStore'
@@ -37,44 +38,81 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       return false
     }
 
-    const selected = useSurfaceSelectionStore.getState().selectedSurface
-    if (!selected) {
+    const targets = getPatternTargetSurfaces()
+    if (targets.length === 0) {
       set({ status: 'error', error: 'Select a surface or part first.' })
       return false
     }
 
-    const entry = usePatternStore.getState().placements[selected.surfaceId]
-    if (!entry?.settings.patternId) {
+    const active = useSurfaceSelectionStore.getState().selectedSurface
+    if (!active) {
+      set({ status: 'error', error: 'Select a surface or part first.' })
+      return false
+    }
+
+    const patternStore = usePatternStore.getState()
+    const activeEntry = patternStore.placements[active.surfaceId]
+    if (!activeEntry?.settings.patternId) {
       set({ status: 'error', error: 'Choose a texture before applying.' })
       return false
     }
 
+    patternStore.syncActivePlacementToTargets(targets, active.surfaceId)
+
     set({ status: 'applying', error: null, warnings: [] })
 
+    const warnings: string[] = []
+    let committedSurfaceIds = [...get().committedSurfaceIds]
+    let appliedCount = 0
+
     try {
-      const sourceMesh = findMeshByUuid(loadedModel.object, selected.meshUuid)
-      if (!sourceMesh) {
-        set({ status: 'error', error: 'Could not find mesh in model.' })
-        return false
+      const placements = usePatternStore.getState().placements
+
+      for (const surface of targets) {
+        const entry = placements[surface.surfaceId]
+        if (!entry?.settings.patternId) {
+          warnings.push(`Skipped ${surface.meshName}: no texture chosen.`)
+          continue
+        }
+
+        const sourceMesh = findMeshByUuid(loadedModel.object, surface.meshUuid)
+        if (!sourceMesh) {
+          warnings.push(`Skipped ${surface.meshName}: mesh not found.`)
+          continue
+        }
+
+        try {
+          commitPatternMaterial(sourceMesh, loadedModel.object, surface, entry.settings)
+          if (!committedSurfaceIds.includes(surface.surfaceId)) {
+            committedSurfaceIds = [...committedSurfaceIds, surface.surfaceId]
+          }
+          appliedCount++
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Apply failed.'
+          warnings.push(`Could not apply to ${surface.meshName}: ${message}`)
+        }
       }
 
-      commitPatternMaterial(sourceMesh, loadedModel.object, selected, entry.settings)
-
-      const committedSurfaceIds = get().committedSurfaceIds.includes(selected.surfaceId)
-        ? get().committedSurfaceIds
-        : [...get().committedSurfaceIds, selected.surfaceId]
+      if (appliedCount === 0) {
+        set({
+          status: 'error',
+          error: 'Could not apply texture to any selected surface.',
+          warnings,
+        })
+        return false
+      }
 
       set({
         status: 'idle',
         committedSurfaceIds,
-        warnings: [],
+        warnings,
         error: null,
         previewActive: false,
       })
       return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Apply failed.'
-      set({ status: 'error', error: message })
+      set({ status: 'error', error: message, warnings })
       return false
     }
   },

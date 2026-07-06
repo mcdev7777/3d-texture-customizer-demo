@@ -5,6 +5,7 @@ import { Button } from '../ui/Button'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useBakeStore } from '../../store/useBakeStore'
+import { getPatternTargetSurfaceIds } from '../../lib/pattern/selectionTargets'
 import {
   DEPTH_MAX,
   DEPTH_MIN,
@@ -54,10 +55,12 @@ function SliderRow({
 
 export function PatternControlsPanel() {
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
+  const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
   const surfaceId = selectedSurface?.surfaceId ?? null
+  const targetSurfaceIds = getPatternTargetSurfaceIds()
 
   const placement = usePatternStore((s) => (surfaceId ? s.placements[surfaceId] : null))
-  const updateSettings = usePatternStore((s) => s.updateSettings)
+  const updateSettingsMany = usePatternStore((s) => s.updateSettingsMany)
   const resetSurface = usePatternStore((s) => s.resetSurface)
   const removeCommitted = useBakeStore((s) => s.removeCommitted)
   const setPreviewActive = useBakeStore((s) => s.setPreviewActive)
@@ -67,13 +70,13 @@ export function PatternControlsPanel() {
 
   const setMode = (mode: PatternMode) => {
     if (!surfaceId) return
-    updateSettings(surfaceId, { mode })
+    updateSettingsMany(targetSurfaceIds, { mode })
     setPreviewActive(true)
   }
 
-  const patch = (partial: Parameters<typeof updateSettings>[1]) => {
+  const patch = (partial: Parameters<typeof updateSettingsMany>[1]) => {
     if (!surfaceId) return
-    updateSettings(surfaceId, partial)
+    updateSettingsMany(targetSurfaceIds, partial)
     setPreviewActive(true)
   }
 
@@ -87,6 +90,7 @@ export function PatternControlsPanel() {
         <>
           <p className="text-xs text-slate-400 mb-3">
             Pattern on {placement?.label ?? selectedSurface.meshName}
+            {selectedSurfaces.length > 1 ? ` (+${selectedSurfaces.length - 1} more)` : ''}
           </p>
 
           <div className="grid grid-cols-2 gap-2 mb-3">
@@ -167,8 +171,10 @@ export function PatternControlsPanel() {
               icon={<RotateCcw className="h-3.5 w-3.5" />}
               onClick={() => {
                 if (!surfaceId) return
-                resetSurface(surfaceId)
-                removeCommitted(surfaceId)
+                for (const id of targetSurfaceIds) {
+                  resetSurface(id)
+                  removeCommitted(id)
+                }
                 setPreviewActive(false)
               }}
               className="w-full text-xs"

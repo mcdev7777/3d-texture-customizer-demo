@@ -31,9 +31,11 @@ export function SurfaceSelectionPanel() {
   const setAngleTolerance = useSurfaceSelectionStore((s) => s.setAngleTolerance)
   const connectedOnly = useSurfaceSelectionStore((s) => s.connectedOnly)
   const setConnectedOnly = useSurfaceSelectionStore((s) => s.setConnectedOnly)
+  const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
   const clearSelection = useSurfaceSelectionStore((s) => s.clearSelection)
   const hasSeed = useSurfaceSelectionStore((s) => s.lastPick !== null)
+  const selectionCount = selectedSurfaces.length
 
   const modes: { id: SelectionMode; label: string }[] = [
     { id: 'surface', label: 'Surface' },
@@ -105,7 +107,7 @@ export function SurfaceSelectionPanel() {
             <p className="text-[11px] text-slate-400">
               {hasSeed
                 ? 'Angle selection active — drag the threshold to grow or shrink the region.'
-                : 'Click a surface to start angle selection.'}
+                : 'Click a surface to start angle selection. Shift+click to add more.'}
             </p>
           )}
         </div>
@@ -114,26 +116,45 @@ export function SurfaceSelectionPanel() {
       <div className="mt-3">
         <Button
           icon={<X className="h-3.5 w-3.5" />}
-          disabled={!selectedSurface}
+          disabled={selectionCount === 0}
           onClick={clearSelection}
           className="w-full text-xs"
         >
           Clear selection
         </Button>
+        {enabled && hasModel && (
+          <p className="text-[10px] text-slate-500 mt-2">
+            Shift+click adds to selection · Right-click clears
+          </p>
+        )}
       </div>
 
       <div className="mt-4 pt-3 border-t border-purple-500/10">
         {selectedSurface ? (
           <div className="space-y-0.5">
+            {selectionCount > 1 && (
+              <StatRow label="Selected" value={`${selectionCount} regions`} />
+            )}
             <StatRow
-              label="Type"
-              value={selectedSurface.selectionType === 'part' ? 'Part' : 'Surface'}
+              label="Active"
+              value={
+                selectionCount > 1
+                  ? `${selectedSurface.meshName} (${selectedSurface.selectionType})`
+                  : selectedSurface.selectionType === 'part'
+                    ? 'Part'
+                    : 'Surface'
+              }
             />
             <StatRow label="Mesh" value={selectedSurface.meshName} />
             <StatRow label="Faces" value={selectedSurface.triangleCount.toLocaleString()} />
             {isSurfaceMode && <StatRow label="Threshold" value={`${angleTolerance.toFixed(0)}°`} />}
             <StatRow label="Normal" value={formatNormal(selectedSurface.normal)} />
             <StatRow label="Area" value={formatArea(selectedSurface.area)} />
+            {selectionCount > 1 && (
+              <p className="text-[10px] text-slate-500 pt-1">
+                Texture library, placement, preview, and apply affect all selected regions.
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-xs text-slate-500">
@@ -142,8 +163,8 @@ export function SurfaceSelectionPanel() {
               : !enabled
                 ? 'Enable selection to pick a surface or part.'
                 : isSurfaceMode
-                  ? 'Click a surface to start angle selection.'
-                  : 'Click a part of the model to select the whole mesh.'}
+                  ? 'Click a surface to start angle selection. Shift+click to add more.'
+                  : 'Click a part to select the whole mesh. Shift+click to add more.'}
           </p>
         )}
       </div>

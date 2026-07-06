@@ -2,30 +2,45 @@ import { useLayoutEffect, useRef } from 'react'
 import { DoubleSide, type Mesh } from 'three'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { markIgnoreRaycast } from '../../lib/three/raycastUtils'
+import {
+  SELECTION_HIGHLIGHT_ACTIVE_COLOR,
+  SELECTION_HIGHLIGHT_ACTIVE_OPACITY,
+  SELECTION_HIGHLIGHT_COLOR,
+  SELECTION_HIGHLIGHT_OPACITY,
+} from '../../lib/surface/selectionHighlight'
 
-export function SelectedSurfaceOverlay() {
+function HighlightMesh({
+  surface,
+  active,
+}: {
+  surface: {
+    surfaceId: string
+    meshUuid: string
+    faceIndex: number
+    triangleCount: number
+    highlightGeometry: Mesh['geometry']
+  }
+  active: boolean
+}) {
   const meshRef = useRef<Mesh>(null)
-  const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
 
   useLayoutEffect(() => {
     if (meshRef.current) markIgnoreRaycast(meshRef.current)
-  }, [selectedSurface?.surfaceId])
-
-  if (!selectedSurface) return null
+  }, [surface.surfaceId])
 
   return (
     <mesh
       ref={meshRef}
-      key={`${selectedSurface.meshUuid}-${selectedSurface.faceIndex}-${selectedSurface.triangleCount}`}
-      geometry={selectedSurface.highlightGeometry}
+      key={`${surface.meshUuid}-${surface.faceIndex}-${surface.triangleCount}-${active ? 'active' : 'idle'}`}
+      geometry={surface.highlightGeometry}
       userData={{ ignoreRaycast: true }}
       raycast={() => null}
-      renderOrder={20}
+      renderOrder={active ? 21 : 20}
     >
       <meshBasicMaterial
-        color="#a78bfa"
+        color={active ? SELECTION_HIGHLIGHT_ACTIVE_COLOR : SELECTION_HIGHLIGHT_COLOR}
         transparent
-        opacity={0.55}
+        opacity={active ? SELECTION_HIGHLIGHT_ACTIVE_OPACITY : SELECTION_HIGHLIGHT_OPACITY}
         depthTest
         depthWrite={false}
         polygonOffset
@@ -34,5 +49,24 @@ export function SelectedSurfaceOverlay() {
         side={DoubleSide}
       />
     </mesh>
+  )
+}
+
+export function SelectedSurfaceOverlay() {
+  const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
+  const activeSurfaceId = useSurfaceSelectionStore((s) => s.activeSurfaceId)
+
+  if (selectedSurfaces.length === 0) return null
+
+  return (
+    <>
+      {selectedSurfaces.map((surface) => (
+        <HighlightMesh
+          key={surface.surfaceId}
+          surface={surface}
+          active={surface.surfaceId === activeSurfaceId}
+        />
+      ))}
+    </>
   )
 }
