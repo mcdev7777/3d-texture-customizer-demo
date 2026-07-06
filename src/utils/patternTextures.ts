@@ -428,8 +428,7 @@ export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasEl
 
 /**
  * Rasterize a pattern (built-in or custom) to ImageData for height-mask sampling.
- * Only used for patterns without a smooth procedural evaluator (custom uploads
- * and `cracks`); procedural built-ins are sampled analytically instead.
+ * Export baking samples this texture to match the shader preview.
  */
 export function getPatternImageData(patternId: PatternId, size = 512): ImageData | null {
   const canvas = getPatternCanvas(patternId, size)

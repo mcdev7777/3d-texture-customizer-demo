@@ -18,11 +18,17 @@ export function CameraController() {
   const lastFittedModelId = useRef<string | null>(null)
 
   useEffect(() => {
+    const perspCamera = camera as PerspectiveCamera
+    perspCamera.up.set(0, 0, 1)
+  }, [camera])
+
+  useEffect(() => {
     const controls = controlsRef.current
     const perspCamera = camera as PerspectiveCamera
     if (!controls) return
 
     const reset = () => {
+      perspCamera.up.set(0, 0, 1)
       const { position, target } = loadedModel
         ? getDefaultCameraPosition(loadedModel.object)
         : EMPTY_SCENE_CAMERA

@@ -20,7 +20,7 @@ function SceneContent() {
 
   return (
     <>
-      <PerspectiveCamera makeDefault position={[5, 4, 5]} fov={45} near={0.01} far={1000} />
+      <PerspectiveCamera makeDefault position={[5, 5, 4]} up={[0, 0, 1]} fov={45} near={0.01} far={1000} />
       <CameraController />
 
       <ambientLight intensity={0.28} />

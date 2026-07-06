@@ -9,6 +9,8 @@ export function fitCameraToObject(
   controls: OrbitControls,
   object: Object3D,
 ): void {
+  camera.up.set(0, 0, 1)
+
   const box = new Box3().setFromObject(object)
   if (box.isEmpty()) return
 
@@ -21,7 +23,7 @@ export function fitCameraToObject(
 
   camera.position.set(
     center.x + distance * 0.65,
-    center.y + distance * 0.45,
+    center.y + distance * 0.65,
     center.z + distance * 0.85,
   )
   camera.near = Math.max(distance / 200, 0.01)
@@ -38,7 +40,7 @@ export function getDefaultCameraPosition(object: Object3D | null): {
 } {
   if (!object) {
     return {
-      position: new Vector3(5, 4, 5),
+      position: new Vector3(5, 5, 4),
       target: new Vector3(0, 0, 0),
     }
   }
@@ -51,14 +53,14 @@ export function getDefaultCameraPosition(object: Object3D | null): {
   return {
     position: new Vector3(
       center.x + maxDim * 1.25,
-      center.y + maxDim * 0.85,
-      center.z + maxDim * 1.25,
+      center.y + maxDim * 1.25,
+      center.z + maxDim * 0.85,
     ),
     target: center.clone(),
   }
 }
 
 export const EMPTY_SCENE_CAMERA = {
-  position: new Vector3(5, 4, 5),
+  position: new Vector3(5, 5, 4),
   target: new Vector3(0, 0, 0),
 }

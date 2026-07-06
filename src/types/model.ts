@@ -29,6 +29,8 @@ export interface LoadedModel {
   object: Object3D
   stats: ModelStats
   objectUrl: string | null
+  /** Multiply viewer-space coordinates to restore source millimeter dimensions. */
+  exportUnitScale: number
 }
 
 export interface ViewerSettings {

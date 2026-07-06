@@ -1,6 +1,9 @@
 import { create } from 'zustand'
-import type { BakeStatus } from '../types/bake'
+import type { BakeStatus, ExportFormat, ExportQuality } from '../types/bake'
+import { DEFAULT_EXPORT_QUALITY } from '../types/bake'
+import type { ExportProgressState } from '../lib/export/exportProgress'
 import { commitPatternMaterial, resetAllPatterns, uncommitSurfacePattern } from '../lib/materials/patternMaterialApply'
+import { exportModifiedModel } from '../lib/export/exportModifiedModel'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { getPatternTargetSurfaces } from '../lib/pattern/selectionTargets'
 import { useAppStore } from './useAppStore'
@@ -13,9 +16,15 @@ interface BakeState {
   warnings: string[]
   error: string | null
   previewActive: boolean
+  exportQuality: ExportQuality
+  /** True while a background export job is running (does not block other UI). */
+  exportActive: boolean
+  exportProgress: ExportProgressState | null
 
   setPreviewActive: (active: boolean) => void
+  setExportQuality: (quality: ExportQuality) => void
   applyTexture: () => Promise<boolean>
+  exportModel: (format: ExportFormat) => Promise<boolean>
   removeCommitted: (surfaceId: string) => void
   resetAll: () => void
 }
@@ -26,8 +35,13 @@ export const useBakeStore = create<BakeState>((set, get) => ({
   warnings: [],
   error: null,
   previewActive: false,
+  exportQuality: DEFAULT_EXPORT_QUALITY,
+  exportActive: false,
+  exportProgress: null,
 
   setPreviewActive: (active) => set({ previewActive: active }),
+
+  setExportQuality: (quality) => set({ exportQuality: quality }),
 
   applyTexture: async () => {
     if (get().status === 'applying') return false
@@ -117,6 +131,55 @@ export const useBakeStore = create<BakeState>((set, get) => ({
     }
   },
 
+  exportModel: async (format) => {
+    if (get().exportActive || get().status === 'applying') return false
+
+    const loadedModel = useAppStore.getState().loadedModel
+    if (!loadedModel) {
+      set({ status: 'error', error: 'Load a model before exporting.' })
+      return false
+    }
+
+    const placements = usePatternStore.getState().placements
+    const committedSurfaceIds = get().committedSurfaceIds
+    if (committedSurfaceIds.length === 0) {
+      set({ status: 'error', error: 'Apply textures to surfaces before exporting.' })
+      return false
+    }
+
+    const quality = get().exportQuality
+    const fileName = useAppStore.getState().fileName?.replace(/\.[^.]+$/, '') ?? 'textured-model'
+
+    set({
+      exportActive: true,
+      error: null,
+      exportProgress: { fraction: 0, label: 'Starting…' },
+    })
+
+    void (async () => {
+      try {
+        await exportModifiedModel({
+          object: loadedModel.object,
+          format,
+          fileName,
+          placements,
+          committedSurfaceIds,
+          quality,
+          exportUnitScale: loadedModel.exportUnitScale,
+          onProgress: (fraction, label) => {
+            set({ exportProgress: { fraction, label } })
+          },
+        })
+        set({ exportActive: false, exportProgress: null })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Export failed.'
+        set({ exportActive: false, exportProgress: null, error: message })
+      }
+    })()
+
+    return true
+  },
+
   removeCommitted: (surfaceId) => {
     const loadedModel = useAppStore.getState().loadedModel
     const removed = uncommitSurfacePattern(loadedModel?.object ?? null, surfaceId)
@@ -137,6 +200,8 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       warnings: [],
       error: null,
       previewActive: false,
+      exportActive: false,
+      exportProgress: null,
     })
   },
 }))
