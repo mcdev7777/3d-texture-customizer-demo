@@ -159,12 +159,13 @@ export async function loadModelFromFile(file: File): Promise<LoadedModel> {
       throw new Error('Failed to parse model — file may be corrupt or contain no geometry.')
     }
 
-    const { object, stats } = normalizeModel(rawObject)
+    const { object, stats, exportUnitScale } = normalizeModel(rawObject)
 
     return {
       object,
       stats,
       objectUrl,
+      exportUnitScale,
     }
   } catch (err) {
     URL.revokeObjectURL(objectUrl)

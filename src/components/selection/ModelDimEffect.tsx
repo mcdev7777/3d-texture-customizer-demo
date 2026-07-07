@@ -7,11 +7,11 @@ const DIM_OPACITY = 0.35
 
 export function ModelDimEffect() {
   const loadedModel = useAppStore((s) => s.loadedModel)
-  const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
+  const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
   const enabled = useSurfaceSelectionStore((s) => s.enabled)
 
-  const shouldDim = enabled && selectedSurface !== null
-  const selectedMeshUuid = selectedSurface?.meshUuid ?? null
+  const shouldDim = enabled && selectedSurfaces.length > 0
+  const selectedMeshUuids = new Set(selectedSurfaces.map((surface) => surface.meshUuid))
 
   useEffect(() => {
     if (!loadedModel) return
@@ -21,7 +21,7 @@ export function ModelDimEffect() {
     loadedModel.object.traverse((child) => {
       if (!('isMesh' in child) || !(child as Mesh).isMesh) return
       const mesh = child as Mesh
-      const skipDim = shouldDim && mesh.uuid === selectedMeshUuid
+      const skipDim = shouldDim && selectedMeshUuids.has(mesh.uuid)
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
 
       for (const mat of materials) {
@@ -48,7 +48,7 @@ export function ModelDimEffect() {
         mat.needsUpdate = true
       }
     }
-  }, [loadedModel, shouldDim, selectedMeshUuid])
+  }, [loadedModel, shouldDim, selectedSurfaces])
 
   return null
 }

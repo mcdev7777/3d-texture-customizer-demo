@@ -19,7 +19,7 @@ import type { SelectionMode } from '../../types/surfaceSelection'
 import type { SurfacePatternSettings } from '../../types/pattern'
 import { DEPTH_MAX } from '../../types/pattern'
 import { createSurfaceProjectionFromHighlight, type SurfaceProjection } from '../geometry/surfaceProjection'
-import { BASE_TILE_WORLD } from '../textures/patternPlacementMath'
+import { getSelectionTileWorld } from '../textures/patternPlacementMath'
 import { depthLevelToDisplacementWorld, getModelMaxDimension } from '../pattern/patternDepth'
 import { getPatternTexture, getPatternTextureAspect } from './patternTexture'
 import { computePatternBounds, type PatternBounds } from './patternBounds'
@@ -43,6 +43,9 @@ uniform vec3 patternOriginWorld;
 uniform vec3 patternTangentWorld;
 uniform vec3 patternBitangentWorld;
 uniform float patternTileWorld;
+uniform float patternSelectionWidth;
+uniform float patternSelectionHeight;
+uniform float patternRepeatScale;
 uniform float patternRotationRad;
 uniform vec2 patternOffsetUV;
 uniform vec2 patternTextureAspect;
@@ -71,8 +74,8 @@ vec3 patternCubicBlendWeights(vec3 n) {
   return vec3(0.0, 0.0, 1.0);
 }
 
-float patternSampleMap(vec2 rawUV) {
-  vec2 uv = (rawUV * patternTextureAspect) / patternTileWorld;
+float patternSampleMap(vec2 normUV) {
+  vec2 uv = normUV;
   float c = cos(patternRotationRad);
   float s = sin(patternRotationRad);
   uv -= 0.5;
@@ -86,7 +89,9 @@ float patternHeightPlanar(vec3 pos) {
   vec3 rel = pos - patternOriginWorld;
   float uWorld = dot(rel, patternTangentWorld);
   float vWorld = dot(rel, patternBitangentWorld);
-  return patternSampleMap(vec2(uWorld, vWorld));
+  float pu = (uWorld / max(patternSelectionWidth, 1e-4) + 0.5) * patternRepeatScale;
+  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) * patternRepeatScale;
+  return patternSampleMap(vec2(pu, pv));
 }
 
 float patternHeightCubic(vec3 pos, vec3 projN) {
@@ -99,9 +104,9 @@ float patternHeightCubic(vec3 pos, vec3 projN) {
   float xyU = (pos.x - patternBoundsMin.x) / md;
   if (projN.z < 0.0) xyU = -xyU;
 
-  float hXY = patternSampleMap(vec2(xyU, (pos.y - patternBoundsMin.y) / md));
-  float hXZ = patternSampleMap(vec2(xzU, (pos.z - patternBoundsMin.z) / md));
-  float hYZ = patternSampleMap(vec2(yzU, (pos.z - patternBoundsMin.z) / md));
+  float hXY = patternSampleMap(vec2(xyU * patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) * patternRepeatScale));
+  float hXZ = patternSampleMap(vec2(xzU * patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) * patternRepeatScale));
+  float hYZ = patternSampleMap(vec2(yzU * patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) * patternRepeatScale));
 
   vec3 wts = patternCubicBlendWeights(projN);
   return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
@@ -192,8 +197,8 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
   const patternId = settings.patternId
   if (!patternId) throw new Error('Pattern id is required.')
 
-  const tileWorld = BASE_TILE_WORLD / Math.max(0.05, settings.scale)
   const aspect = getPatternTextureAspect(patternId)
+  const tileWorld = getSelectionTileWorld(projection, aspect.u, aspect.v, settings.scale)
   const modelMaxDim = getModelMaxDimension(modelRoot)
   const amplitude = depthLevelToDisplacementWorld(settings.depth, modelMaxDim)
   const b = bounds ?? {
@@ -209,6 +214,9 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
     patternTangentWorld: { value: projection.tangentWorld.clone() },
     patternBitangentWorld: { value: projection.bitangentWorld.clone() },
     patternTileWorld: { value: tileWorld },
+    patternSelectionWidth: { value: projection.width },
+    patternSelectionHeight: { value: projection.height },
+    patternRepeatScale: { value: Math.max(0.05, settings.scale) },
     patternRotationRad: { value: (settings.rotation * Math.PI) / 180 },
     patternOffsetUV: { value: new Vector2(settings.offsetX, settings.offsetY) },
     patternTextureAspect: { value: new Vector2(aspect.u, aspect.v) },
@@ -222,8 +230,8 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
 }
 
 function patternProgramCacheKey(options: PatternMaterialOptions): string {
-  const { settings, mappingMode } = options
-  return `pattern:v5:${mappingMode}:${settings.mode}:${settings.patternId ?? 'none'}:${settings.depth.toFixed(2)}:${settings.scale.toFixed(2)}:${settings.rotation.toFixed(0)}:${settings.invert ? 1 : 0}`
+  const { settings, mappingMode, projection } = options
+  return `pattern:v7:${mappingMode}:${settings.mode}:${settings.patternId ?? 'none'}:${settings.depth.toFixed(2)}:${settings.scale.toFixed(2)}:${settings.rotation.toFixed(0)}:${settings.invert ? 1 : 0}:${projection.width.toFixed(3)}:${projection.height.toFixed(3)}`
 }
 
 function applyDepthMaterialFeel(material: Material, depth: number): void {
@@ -338,9 +346,12 @@ export function buildPatternMaterialOptions(
     anchor: Vector3
     triangleIndices: readonly number[]
     selectionType: SelectionMode
+    mappingMode?: SelectionMode
+    cubicBoundsTriangles?: readonly number[]
   },
   baseMaterial: Material,
 ): PatternMaterialOptions {
+  const mappingMode = region.mappingMode ?? region.selectionType
   const projection = buildProjectionForMesh(
     mesh,
     region.normal,
@@ -349,9 +360,13 @@ export function buildPatternMaterialOptions(
     stateGeometry,
   )
 
+  const boundsTriangles =
+    mappingMode === 'part'
+      ? (region.cubicBoundsTriangles ?? region.triangleIndices)
+      : region.triangleIndices
   const bounds =
-    region.selectionType === 'part'
-      ? computePatternBounds(mesh, stateGeometry, region.triangleIndices)
+    mappingMode === 'part'
+      ? computePatternBounds(mesh, stateGeometry, boundsTriangles)
       : undefined
 
   return {
@@ -360,7 +375,7 @@ export function buildPatternMaterialOptions(
     baseMaterial,
     sourceGeometry: stateGeometry,
     modelRoot,
-    mappingMode: region.selectionType,
+    mappingMode,
     bounds,
   }
 }

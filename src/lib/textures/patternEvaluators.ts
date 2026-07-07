@@ -54,10 +54,10 @@ function crosshatch(u: number, v: number): number {
 }
 
 function dots(u: number, v: number): number {
-  const du = frac(u) - 0.5
-  const dv = frac(v) - 0.5
+  const du = frac(u * 8) - 0.5
+  const dv = frac(v * 8) - 0.5
   const d = Math.hypot(du, dv)
-  return discMask(d, 0.3, 0.09)
+  return discMask(d, 0.28, 0.04)
 }
 
 function ribbed(_u: number, v: number): number {

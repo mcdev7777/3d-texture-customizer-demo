@@ -7,13 +7,19 @@ export function BottomStatusBar() {
   const isLoading = useAppStore((s) => s.isLoading)
   const hasModel = useAppStore((s) => !!s.loadedModel)
   const bakeStatus = useBakeStore((s) => s.status)
+  const exportActive = useBakeStore((s) => s.exportActive)
+  const exportProgress = useBakeStore((s) => s.exportProgress)
   const appliedCount = useBakeStore((s) => s.committedSurfaceIds.length)
   const previewActive = useBakeStore((s) => s.previewActive)
 
   const bakeLabel =
     bakeStatus === 'applying'
       ? 'Applying…'
-      : bakeStatus === 'error'
+      : exportActive
+        ? exportProgress
+          ? `Exporting… ${Math.round(exportProgress.fraction * 100)}%`
+          : 'Exporting…'
+        : bakeStatus === 'error'
         ? 'Error'
         : appliedCount > 0
           ? `${appliedCount} textured`
@@ -52,6 +58,8 @@ export function BottomStatusBar() {
         <span>LMB — Orbit</span>
         <span className="hidden sm:inline">MMB — Pan</span>
         <span>Scroll — Zoom</span>
+        <span className="hidden md:inline">Shift+click — Add</span>
+        <span className="hidden md:inline">RMB — Clear</span>
       </div>
     </footer>
   )

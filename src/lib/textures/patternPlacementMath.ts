@@ -1,3 +1,4 @@
+import type { Object3D } from 'three'
 import type { PatternMode, SurfacePatternSettings } from '../../types/pattern'
 import { DEPTH_MAX, DEPTH_MIN } from '../../types/pattern'
 import { evaluatePattern, smoothstep } from './patternEvaluators'
@@ -6,11 +7,44 @@ import { evaluatePattern, smoothstep } from './patternEvaluators'
 export const PATTERN_OFFSET_SCALE = 1
 
 /**
- * Physical size (in normalized model units) of one pattern tile at scale 1.
- * Using a world-space tile keeps pattern density consistent across differently
- * sized surfaces/islands instead of stretching to each patch's bounds.
+ * Physical tile size in millimeters at pattern scale 1.
+ * Viewer tile size is derived via exportUnitScale so preview matches export.
  */
-export const BASE_TILE_WORLD = 0.6
+export const BASE_TILE_MM = 0.6
+
+/** @deprecated Use BASE_TILE_MM — kept for existing imports. */
+export const BASE_TILE_WORLD = BASE_TILE_MM
+
+export function getExportUnitScale(modelRoot: Object3D | null | undefined): number {
+  let root = modelRoot ?? null
+  while (root) {
+    const scale = root.userData?.exportUnitScale
+    if (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) return scale
+    root = root.parent
+  }
+  return 1
+}
+
+/** Viewer-space tile width for pattern mapping at the given scale. */
+export function getPatternTileWorld(scale: number, exportUnitScale: number): number {
+  return BASE_TILE_MM / (Math.max(0.05, scale) * Math.max(exportUnitScale, 1e-6))
+}
+
+/**
+ * Tile world size so one pattern period spans the selection at scale 1.
+ * Higher scale → more repeats (scale 2 ≈ 4 tiles on a square selection).
+ */
+export function getSelectionTileWorld(
+  projection: { width: number; height: number },
+  aspectU: number,
+  aspectV: number,
+  scale: number,
+): number {
+  const s = Math.max(0.05, scale)
+  const extentU = Math.max(projection.width, 1e-6) * aspectU
+  const extentV = Math.max(projection.height, 1e-6) * aspectV
+  return Math.max(extentU, extentV) / s
+}
 
 /**
  * Bump strength at minimum and maximum depth slider values.
@@ -62,9 +96,12 @@ export function getReliefDisplacement(
   maskValue: number,
   mode: PatternMode,
   depthWorld: number,
+  inverted = false,
 ): number {
   const shaped = applyRoundedProfile(applyContrast(maskValue))
-  return mode === 'engrave' ? (1 - shaped) * depthWorld : shaped * depthWorld
+  const ink = inverted ? shaped : 1 - shaped
+  const raised = mode === 'engrave' ? 1 - ink : ink
+  return raised * depthWorld
 }
 
 /**
@@ -76,8 +113,9 @@ export function worldToPatternUV(
   uWorld: number,
   vWorld: number,
   settings: Pick<SurfacePatternSettings, 'scale' | 'rotation' | 'offsetX' | 'offsetY'>,
+  exportUnitScale = 1,
 ): [number, number] {
-  const tile = BASE_TILE_WORLD / Math.max(0.05, settings.scale)
+  const tile = getPatternTileWorld(settings.scale, exportUnitScale)
   const rad = (settings.rotation * Math.PI) / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
@@ -133,11 +171,9 @@ export function sampleReliefHeight(
   vWorld: number,
   settings: Pick<SurfacePatternSettings, 'scale' | 'rotation' | 'offsetX' | 'offsetY'>,
   fallbackImage: ImageData | null,
+  exportUnitScale = 1,
 ): number {
-  const [pu, pv] = worldToPatternUV(uWorld, vWorld, settings)
-
-  const procedural = evaluatePattern(patternId, pu, pv)
-  if (procedural !== null) return procedural
+  const [pu, pv] = worldToPatternUV(uWorld, vWorld, settings, exportUnitScale)
 
   if (fallbackImage) {
     const raw = sampleImageHeightBilinear(
@@ -149,5 +185,9 @@ export function sampleReliefHeight(
     )
     return smoothstep(0.08, 0.95, raw)
   }
+
+  const procedural = evaluatePattern(patternId, pu, pv)
+  if (procedural !== null) return procedural
+
   return 0
 }

@@ -4,7 +4,7 @@ import { getPatternCanvas, getPatternTileAspect } from '../../utils/patternTextu
 
 const textureCache = new Map<string, Texture>()
 
-const TEXTURE_CACHE_VERSION = 'v4'
+const TEXTURE_CACHE_VERSION = 'v5'
 
 /** Grayscale height-map texture for shader sampling (repeat wrapping). */
 export function getPatternTexture(patternId: PatternId, size = 512): Texture {

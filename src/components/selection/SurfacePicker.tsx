@@ -25,11 +25,12 @@ function isSelectableMesh(object: unknown, modelRoot: Object3D | null): object i
 export function SurfacePicker() {
   const { camera, gl } = useThree()
   const raycaster = useRef(new Raycaster())
-  const pointerDown = useRef<{ x: number; y: number; id: number } | null>(null)
+  const pointerDown = useRef<{ x: number; y: number; id: number; button: number } | null>(null)
 
   const loadedModel = useAppStore((s) => s.loadedModel)
   const enabled = useSurfaceSelectionStore((s) => s.enabled)
   const selectFromPick = useSurfaceSelectionStore((s) => s.selectFromPick)
+  const clearSelection = useSurfaceSelectionStore((s) => s.clearSelection)
   const setModelRoot = useSurfaceSelectionStore((s) => s.setModelRoot)
 
   useEffect(() => {
@@ -42,13 +43,29 @@ export function SurfacePicker() {
     const canvas = gl.domElement
     raycaster.current.firstHitOnly = true
 
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
+    }
+
     const onPointerDown = (event: PointerEvent) => {
+      if (event.button === 2) {
+        pointerDown.current = null
+        clearSelection()
+        return
+      }
       if (event.button !== 0) return
-      pointerDown.current = { x: event.clientX, y: event.clientY, id: event.pointerId }
+      pointerDown.current = {
+        x: event.clientX,
+        y: event.clientY,
+        id: event.pointerId,
+        button: event.button,
+      }
     }
 
     const onPointerUp = (event: PointerEvent) => {
+      if (event.button === 2) return
       if (event.button !== 0) return
+
       const start = pointerDown.current
       pointerDown.current = null
       if (!start || start.id !== event.pointerId) return
@@ -64,7 +81,6 @@ export function SurfacePicker() {
       _pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
 
       raycaster.current.setFromCamera(_pointer, camera)
-      // Raycast only the loaded model subtree — overlays live on the scene root, not here.
       const hits = raycaster.current.intersectObject(loadedModel.object, true)
 
       const hit = hits.find((h) => isSelectableMesh(h.object, loadedModel.object))
@@ -79,28 +95,33 @@ export function SurfacePicker() {
       _point.copy(hit.point)
       computeFaceNormal(mesh.geometry, faceIndex, mesh, _normal)
 
-      selectFromPick({
-        mesh,
-        faceIndex,
-        point: _point.clone(),
-        normal: _normal.clone(),
-      })
+      selectFromPick(
+        {
+          mesh,
+          faceIndex,
+          point: _point.clone(),
+          normal: _normal.clone(),
+        },
+        { additive: event.shiftKey },
+      )
     }
 
     const onPointerCancel = () => {
       pointerDown.current = null
     }
 
+    canvas.addEventListener('contextmenu', onContextMenu)
     canvas.addEventListener('pointerdown', onPointerDown)
     canvas.addEventListener('pointerup', onPointerUp)
     canvas.addEventListener('pointercancel', onPointerCancel)
 
     return () => {
+      canvas.removeEventListener('contextmenu', onContextMenu)
       canvas.removeEventListener('pointerdown', onPointerDown)
       canvas.removeEventListener('pointerup', onPointerUp)
       canvas.removeEventListener('pointercancel', onPointerCancel)
     }
-  }, [enabled, loadedModel, camera, gl, selectFromPick])
+  }, [enabled, loadedModel, camera, gl, selectFromPick, clearSelection])
 
   return null
 }

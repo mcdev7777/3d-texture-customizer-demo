@@ -7,6 +7,7 @@ import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useBakeStore } from '../../store/useBakeStore'
 import { useCustomTextureStore } from '../../store/useCustomTextureStore'
+import { getPatternTargetSurfaces } from '../../lib/pattern/selectionTargets'
 import { PATTERN_DEFINITIONS, createPatternThumbnail } from '../../utils/patternTextures'
 import type { PatternId } from '../../types/pattern'
 
@@ -51,7 +52,8 @@ function PatternButton({
 
 export function PatternLibraryPanel() {
   const selectedSurface = useSurfaceSelectionStore((s) => s.selectedSurface)
-  const applyPattern = usePatternStore((s) => s.applyPattern)
+  const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
+  const applyPatternToMany = usePatternStore((s) => s.applyPatternToMany)
   const currentPatternId = usePatternStore((s) =>
     selectedSurface ? s.placements[selectedSurface.surfaceId]?.settings.patternId : null,
   )
@@ -73,8 +75,9 @@ export function PatternLibraryPanel() {
   }, [])
 
   const handleSelect = (patternId: PatternId) => {
-    if (!selectedSurface) return
-    applyPattern(selectedSurface, patternId)
+    const targets = getPatternTargetSurfaces()
+    if (targets.length === 0) return
+    applyPatternToMany(targets, patternId)
     setPreviewActive(true)
   }
 
@@ -95,8 +98,10 @@ export function PatternLibraryPanel() {
         <p className="text-xs text-slate-500 mb-3">Select a surface or part first.</p>
       ) : (
         <p className="text-xs text-slate-400 mb-3">
-          Applying to {selectedSurface.meshName || 'surface'}
-          {selectedSurface.selectionType === 'part' ? ' (part)' : ''}
+          Applying to{' '}
+          {selectedSurfaces.length > 1
+            ? `${selectedSurfaces.length} selections`
+            : `${selectedSurface.meshName || 'surface'}${selectedSurface.selectionType === 'part' ? ' (part)' : ''}`}
         </p>
       )}
 

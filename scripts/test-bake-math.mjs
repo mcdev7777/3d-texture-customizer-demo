@@ -15,8 +15,13 @@ function smoothstep(e0, e1, x) {
   return t * t * (3 - 2 * t)
 }
 
-function worldToPatternUV(uWorld, vWorld, s) {
-  const tile = BASE_TILE_WORLD / Math.max(0.05, s.scale)
+function getPatternTile(scale, exportUnitScale = 1) {
+  const BASE_TILE_MM = 0.6
+  return BASE_TILE_MM / (Math.max(0.05, scale) * Math.max(exportUnitScale, 1e-6))
+}
+
+function worldToPatternUV(uWorld, vWorld, s, exportUnitScale = 1) {
+  const tile = getPatternTile(s.scale, exportUnitScale)
   const rad = (s.rotation * Math.PI) / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)

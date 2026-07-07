@@ -1,9 +1,11 @@
 import { Vector3 } from 'three'
 import type { PatternId, SurfacePatternSettings } from '../../types/pattern'
+import type { ExportQuality } from '../../types/bake'
 import type { SelectionMode } from '../../types/surfaceSelection'
 import type { PatternBounds } from '../materials/patternBounds'
 import type { SurfaceProjection } from '../geometry/surfaceProjection'
-import { BASE_TILE_WORLD } from './patternPlacementMath'
+import { EXPORT_QUALITY } from '../geometry/subdivideSelection'
+import { getSelectionTileWorld } from './patternPlacementMath'
 import { evaluatePattern } from './patternEvaluators'
 import { getPatternImageData } from '../../utils/patternTextures'
 import { getPatternTextureAspect } from '../materials/patternTexture'
@@ -24,9 +26,22 @@ export interface ProjectionContext {
 const _rel = new Vector3()
 
 function worldCoordsToPatternUV(rawU: number, rawV: number, ctx: ProjectionContext): [number, number] {
-  const { settings, aspectU, aspectV, tileWorld } = ctx
-  let pu = (rawU * aspectU) / tileWorld
-  let pv = (rawV * aspectV) / tileWorld
+  const { settings, projection, mappingMode } = ctx
+  const scale = Math.max(0.05, settings.scale)
+
+  let pu: number
+  let pv: number
+
+  if (mappingMode === 'part') {
+    // Cubic path passes 0–1 part-local coords; scale multiplies repeat count.
+    pu = rawU * scale
+    pv = rawV * scale
+  } else {
+    // Planar: map selection tangent space to 0–1 at scale 1, centered on origin.
+    pu = (rawU / Math.max(projection.width, 1e-6) + 0.5) * scale
+    pv = (rawV / Math.max(projection.height, 1e-6) + 0.5) * scale
+  }
+
   const rad = (settings.rotation * Math.PI) / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
@@ -40,13 +55,10 @@ function worldCoordsToPatternUV(rawU: number, rawV: number, ctx: ProjectionConte
 }
 
 function sampleHeightAtPatternUV(pu: number, pv: number, ctx: ProjectionContext): number {
-  const procedural = evaluatePattern(ctx.patternId, pu, pv)
-  const raw =
-    procedural !== null
-      ? procedural
-      : ctx.imageData
-        ? sampleImageHeight(ctx.imageData, pu, pv, true)
-        : 0
+  // Match shader preview: sample the pattern heightmap texture when available.
+  const raw = ctx.imageData
+    ? sampleImageHeight(ctx.imageData, pu, pv, true)
+    : (evaluatePattern(ctx.patternId, pu, pv) ?? 0)
   return shapeHeightSample(raw, {
     invert: ctx.settings.invert ?? false,
     smoothing: ctx.settings.smoothing ?? 0,
@@ -63,12 +75,14 @@ function samplePlanarHeight(worldPos: Vector3, ctx: ProjectionContext): number {
   return sampleMapHeight(_rel.dot(ctx.projection.tangentWorld), _rel.dot(ctx.projection.bitangentWorld), ctx)
 }
 
+const CUBIC_AXIS_EPSILON = 1e-4
+
 function dominantAxis(n: Vector3): 'x' | 'y' | 'z' {
   const ax = Math.abs(n.x)
   const ay = Math.abs(n.y)
   const az = Math.abs(n.z)
-  if (ax >= ay && ax >= az) return 'x'
-  if (ay >= az) return 'y'
+  if (ax >= ay - CUBIC_AXIS_EPSILON && ax >= az - CUBIC_AXIS_EPSILON) return 'x'
+  if (ay >= az - CUBIC_AXIS_EPSILON) return 'y'
   return 'z'
 }
 
@@ -107,17 +121,22 @@ export function createProjectionContext(
   mappingMode: SelectionMode,
   projection: SurfaceProjection,
   bounds: PatternBounds,
+  _exportUnitScale: number,
+  exportQuality: ExportQuality = 'medium',
 ): ProjectionContext {
   const aspect = getPatternTextureAspect(patternId)
+  const tileWorld = getSelectionTileWorld(projection, aspect.u, aspect.v, settings.scale)
+  const textureSize = EXPORT_QUALITY[exportQuality].textureSize
+
   return {
     patternId,
     settings,
     mappingMode,
     projection,
     bounds,
-    imageData: getPatternImageData(patternId),
+    imageData: getPatternImageData(patternId, textureSize),
     aspectU: aspect.u,
     aspectV: aspect.v,
-    tileWorld: BASE_TILE_WORLD / Math.max(0.05, settings.scale),
+    tileWorld,
   }
 }

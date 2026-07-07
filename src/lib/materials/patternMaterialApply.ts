@@ -6,7 +6,8 @@ import {
   Vector3,
   type Object3D,
 } from 'three'
-import type { SurfacePatternSettings } from '../../types/pattern'
+import type { SurfacePatternSettings, SurfacePatternPlacement } from '../../types/pattern'
+import type { ExportQuality } from '../../types/bake'
 import type { SelectedSurface, SelectionMode } from '../../types/surfaceSelection'
 import {
   buildPatternMaterialOptions,
@@ -19,10 +20,13 @@ import {
   bakeReliefIntoGeometry,
   createBakeContext,
 } from '../geometry/bakeReliefDisplacement'
+import { splitVerticesAlongPatchBoundary, splitVerticesAlongSharpEdges } from '../geometry/splitSharpEdges'
+import { buildSurfaceIslands } from '../geometry/surfaceIslands'
 import { getConnectedCoplanarSurface } from '../surface/getConnectedCoplanarSurface'
 import { getFacesByAngle } from '../surface/selectByAngle'
 import { mapLiveFaceIndexToPristine } from '../surface/mapFaceToPristine'
 import { clampFaceIndex } from '../surface/meshUtils'
+import { buildSelectedSurfaceFromId, findMeshByUuid, parseSurfaceId } from '../surface/restoreSurfaceFromId'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import {
   registerMeshPristineGeometry,
@@ -30,7 +34,15 @@ import {
   clearMeshPristineRegistry,
 } from './meshPatternRegistry'
 
-const PREVIEW_SURFACE_ID = '__preview__'
+const PREVIEW_PREFIX = '__preview__:'
+
+function previewRegionId(surfaceId: string): string {
+  return `${PREVIEW_PREFIX}${surfaceId}`
+}
+
+function isPreviewRegion(surfaceId: string): boolean {
+  return surfaceId.startsWith(PREVIEW_PREFIX)
+}
 
 export interface PatternRegion {
   surfaceId: string
@@ -39,6 +51,10 @@ export interface PatternRegion {
   normal: Vector3
   anchor: Vector3
   selectionType: SelectionMode
+  /** How pattern UVs are sampled; defaults to selectionType when omitted. */
+  mappingMode?: SelectionMode
+  /** Full part triangle set for cubic bounds when islands bake with part mapping. */
+  cubicBoundsTriangles?: readonly number[]
 }
 
 interface MeshPatternState {
@@ -148,34 +164,131 @@ function createRegionMaterial(
   )
 }
 
-function bakeCommittedIntoGeometry(
+function expandRegionsForExport(
+  mesh: Mesh,
+  state: MeshPatternState,
+  regions: PatternRegion[],
+): PatternRegion[] {
+  const { angleTolerance } = useSurfaceSelectionStore.getState()
+  const expanded: PatternRegion[] = []
+
+  for (const region of regions) {
+    if (region.selectionType !== 'part') {
+      expanded.push(region)
+      continue
+    }
+
+    const islands = buildSurfaceIslands(
+      state.pristineGeometry,
+      mesh,
+      region.triangleIndices,
+      angleTolerance,
+      region.surfaceId,
+    )
+
+    for (const island of islands) {
+      expanded.push({
+        surfaceId: island.id,
+        triangleIndices: island.faceIds,
+        settings: region.settings,
+        normal: island.normal,
+        anchor: island.anchor,
+        selectionType: 'surface',
+        mappingMode: 'part',
+        cubicBoundsTriangles: region.triangleIndices,
+      })
+    }
+  }
+
+  return expanded
+}
+
+async function bakeCommittedIntoGeometry(
   mesh: Mesh,
   modelRoot: Object3D,
   geometry: BufferGeometry,
   state: MeshPatternState,
-  committed: PatternRegion[],
-): BufferGeometry {
-  if (committed.length === 0) return geometry
+  regions: PatternRegion[],
+  quality: ExportQuality,
+  exportUnitScale: number,
+  onProgress?: (fraction: number, label: string) => void,
+): Promise<BufferGeometry> {
+  if (regions.length === 0) return geometry
 
-  let geo = geometry
-  let { pristineTriMap, pristineWorldBuffer } = createBakeContext(mesh, state.pristineGeometry)
+  const exportRegions = expandRegionsForExport(mesh, state, regions)
 
-  for (const region of committed) {
+  if (import.meta.env.DEV) {
+    console.log('[3MF export] target mesh:', mesh.uuid)
+    console.log('[3MF export] placement regions:', regions.length)
+    console.log('[3MF export] bake regions:', exportRegions.length)
+    console.log(
+      '[3MF export] surface islands:',
+      exportRegions.map((r) => ({
+        id: r.surfaceId,
+        faceCount: r.triangleIndices.length,
+        selectionType: r.selectionType,
+        mappingMode: r.mappingMode ?? r.selectionType,
+        normal: r.normal.toArray().map((v) => +v.toFixed(3)),
+      })),
+    )
+  }
+
+  let geo = splitVerticesAlongSharpEdges(geometry)
+  if (geo !== geometry) geometry.dispose()
+
+  const patchTriangles = new Set<number>()
+  for (const region of exportRegions) {
+    for (const t of region.triangleIndices) patchTriangles.add(t)
+  }
+  const withBoundary = splitVerticesAlongPatchBoundary(geo, patchTriangles)
+  if (withBoundary !== geo) {
+    geo.dispose()
+    geo = withBoundary
+  }
+
+  const pristineExportGeometry = geo
+  let { pristineTriMap, pristineWorldBuffer } = createBakeContext(mesh, pristineExportGeometry)
+
+  const regionCount = exportRegions.filter((r) => r.settings.patternId).length
+  let regionIndex = 0
+
+  for (const region of exportRegions) {
     if (!region.settings.patternId) continue
-    const baked = bakeReliefIntoGeometry({
-      mesh,
-      modelRoot,
-      geometry: geo,
-      pristineGeometry: state.pristineGeometry,
-      region,
-      quality: 'apply',
-      pristineTriMap,
-      pristineWorldBuffer,
-    })
+
+    const regionStart = regionIndex / Math.max(regionCount, 1)
+    regionIndex++
+    const regionEnd = regionIndex / Math.max(regionCount, 1)
+
+    onProgress?.(
+      regionStart,
+      regionCount > 1
+        ? `Baking pattern ${regionIndex}/${regionCount}…`
+        : 'Baking relief…',
+    )
+
+    const baked = await bakeReliefIntoGeometry(
+      {
+        mesh,
+        modelRoot,
+        geometry: geo,
+        pristineGeometry: pristineExportGeometry,
+        region,
+        quality,
+        exportUnitScale,
+        pristineTriMap,
+        pristineWorldBuffer,
+      },
+      (subFraction) => {
+        const fraction = regionStart + (regionEnd - regionStart) * subFraction * 0.85
+        onProgress?.(fraction, regionCount > 1 ? `Refining mesh (${regionIndex}/${regionCount})…` : 'Refining mesh…')
+      },
+    )
     geo = baked.geometry
     pristineTriMap = baked.pristineTriMap
     pristineWorldBuffer = baked.pristineWorldBuffer
   }
+
+  onProgress?.(1, 'Bake complete')
 
   geo.deleteAttribute('pristineWorld')
   geo.computeBoundingBox()
@@ -269,24 +382,165 @@ function rebuildMesh(mesh: Mesh, modelRoot: Object3D, regions: PatternRegion[]):
   }
 }
 
-/** Bake committed pattern relief into geometry for export (not used for viewport). */
-export function bakeCommittedPatternsIntoGeometry(
+export function collectAllExportRegionsForMesh(
   mesh: Mesh,
   modelRoot: Object3D,
-): BufferGeometry {
+  placements: Record<string, SurfacePatternPlacement>,
+  committedSurfaceIds: readonly string[],
+): PatternRegion[] {
+  const committed = new Set(committedSurfaceIds)
+  const regions: PatternRegion[] = []
+  const seen = new Set<string>()
   const state = meshStates.get(mesh.uuid)
-  if (!state) return mesh.geometry.clone()
 
-  const committed = state.regions.filter((r) => r.surfaceId !== PREVIEW_SURFACE_ID)
-  if (committed.length === 0) return mesh.geometry.clone()
+  if (state) {
+    for (const region of state.regions) {
+      if (isPreviewRegion(region.surfaceId)) continue
+      if (!committed.has(region.surfaceId)) continue
 
+      const placement = placements[region.surfaceId]
+      const settings = {
+        ...region.settings,
+        ...(placement?.settings ?? {}),
+      }
+      if (!settings.patternId) continue
+
+      regions.push({
+        surfaceId: region.surfaceId,
+        triangleIndices: region.triangleIndices,
+        settings,
+        normal: region.normal.clone(),
+        anchor: region.anchor.clone(),
+        selectionType: region.selectionType,
+        mappingMode: region.mappingMode ?? region.selectionType,
+        cubicBoundsTriangles: region.cubicBoundsTriangles,
+      })
+      seen.add(region.surfaceId)
+    }
+  }
+
+  for (const surfaceId of committedSurfaceIds) {
+    if (seen.has(surfaceId)) continue
+
+    const placement = placements[surfaceId]
+    if (!placement?.settings.patternId) continue
+
+    const parsed = parseSurfaceId(surfaceId)
+    if (!parsed || parsed.meshUuid !== mesh.uuid) continue
+
+    const surface = buildSelectedSurfaceFromId(surfaceId, modelRoot)
+    if (!surface) continue
+
+    try {
+      regions.push(buildRegion(mesh, surface, placement.settings, surfaceId))
+      seen.add(surfaceId)
+    } finally {
+      surface.highlightGeometry.dispose()
+    }
+  }
+
+  return regions
+}
+
+/**
+ * Rebuild committed pattern regions on every mesh before export so all applied
+ * surfaces are present even if the user changed selection after applying.
+ */
+export function refreshCommittedPatternsForExport(
+  modelRoot: Object3D,
+  placements: Record<string, SurfacePatternPlacement>,
+  committedSurfaceIds: readonly string[],
+): void {
+  const byMesh = new Map<string, string[]>()
+  for (const surfaceId of committedSurfaceIds) {
+    const placement = placements[surfaceId]
+    if (!placement?.settings.patternId) continue
+    const parsed = parseSurfaceId(surfaceId)
+    if (!parsed) continue
+    const list = byMesh.get(parsed.meshUuid) ?? []
+    list.push(surfaceId)
+    byMesh.set(parsed.meshUuid, list)
+  }
+
+  for (const [meshUuid, surfaceIds] of byMesh) {
+    const mesh = findMeshByUuid(modelRoot, meshUuid)
+    if (!mesh) continue
+
+    const state = ensureMeshState(mesh)
+    const regionMap = new Map<string, PatternRegion>()
+    for (const region of state.regions) {
+      if (!isPreviewRegion(region.surfaceId)) {
+        regionMap.set(region.surfaceId, region)
+      }
+    }
+
+    for (const surfaceId of surfaceIds) {
+      const placement = placements[surfaceId]
+      if (!placement?.settings.patternId) continue
+      const surface = buildSelectedSurfaceFromId(surfaceId, modelRoot)
+      if (!surface) continue
+      try {
+        regionMap.set(
+          surfaceId,
+          buildRegion(mesh, surface, placement.settings, surfaceId),
+        )
+      } finally {
+        surface.highlightGeometry.dispose()
+      }
+    }
+
+    state.regions = [...regionMap.values()]
+    rebuildMesh(mesh, modelRoot, state.regions)
+  }
+}
+
+function cloneBaseGeometryForExport(mesh: Mesh): BufferGeometry {
+  const state = meshStates.get(mesh.uuid)
+  if (state) return ensureIndexedGeometry(state.pristineGeometry.clone())
+  return ensureIndexedGeometry(mesh.geometry.clone())
+}
+
+/** Bake all committed pattern regions into a cloned geometry for printable export. */
+export async function bakePatternsForExport(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  placements: Record<string, SurfacePatternPlacement>,
+  committedSurfaceIds: readonly string[],
+  quality: ExportQuality,
+  exportUnitScale: number,
+  onProgress?: (fraction: number, label: string) => void,
+): Promise<BufferGeometry> {
+  const regions = collectAllExportRegionsForMesh(
+    mesh,
+    modelRoot,
+    placements,
+    committedSurfaceIds,
+  )
+  if (regions.length === 0) return cloneBaseGeometryForExport(mesh)
+
+  if (import.meta.env.DEV) {
+    const selectedFaceCount = regions.reduce((n, r) => n + r.triangleIndices.length, 0)
+    console.log('[3MF export] committed regions on mesh:', regions.length)
+    console.log('[3MF export] selected triangle count:', selectedFaceCount)
+  }
+
+  const state = ensureMeshState(mesh)
   let geometry = ensureIndexedGeometry(state.pristineGeometry.clone())
   if (!geometry.index) {
     geometry.dispose()
-    throw new Error('Could not prepare mesh geometry for texturing.')
+    throw new Error('Could not prepare mesh geometry for export baking.')
   }
 
-  return bakeCommittedIntoGeometry(mesh, modelRoot, geometry, state, committed)
+  return bakeCommittedIntoGeometry(
+    mesh,
+    modelRoot,
+    geometry,
+    state,
+    regions,
+    quality,
+    exportUnitScale,
+    onProgress,
+  )
 }
 
 function resolveTriangleIndices(
@@ -330,6 +584,7 @@ function buildRegion(
     normal: selectedSurface.normal.clone(),
     anchor: selectedSurface.point.clone(),
     selectionType: selectedSurface.selectionType,
+    mappingMode: selectedSurface.selectionType,
   }
 }
 
@@ -356,15 +611,46 @@ export function applyPreviewPattern(
   selectedSurface: SelectedSurface,
   settings: SurfacePatternSettings,
 ): void {
+  syncMeshPreviewPatterns(mesh, modelRoot, [{ surface: selectedSurface, settings }])
+}
+
+export interface MeshPreviewTarget {
+  surface: SelectedSurface
+  settings: SurfacePatternSettings
+}
+
+/** Set all preview regions on one mesh at once (multi-select safe). */
+export function syncMeshPreviewPatterns(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  previews: MeshPreviewTarget[],
+): void {
+  if (previews.length === 0) {
+    removePreviewPattern(mesh, modelRoot)
+    return
+  }
+
   const state = ensureMeshState(mesh)
-  const previewRegion = buildRegion(mesh, selectedSurface, settings, PREVIEW_SURFACE_ID)
-  const committed = state.regions.filter((r) => r.surfaceId !== PREVIEW_SURFACE_ID)
-  rebuildMesh(mesh, modelRoot, [...committed, previewRegion])
+  const committed = state.regions.filter((r) => !isPreviewRegion(r.surfaceId))
+  const seen = new Set<string>()
+  const previewRegions: PatternRegion[] = []
+
+  for (const { surface, settings } of previews) {
+    if (seen.has(surface.surfaceId)) continue
+    seen.add(surface.surfaceId)
+    previewRegions.push(
+      buildRegion(mesh, surface, settings, previewRegionId(surface.surfaceId)),
+    )
+  }
+
+  state.regions = [...committed, ...previewRegions]
+  rebuildMesh(mesh, modelRoot, state.regions)
 }
 
 export function removePreviewPattern(mesh: Mesh, modelRoot: Object3D): void {
   const state = meshStates.get(mesh.uuid)
   if (!state) return
+  state.regions = state.regions.filter((r) => !isPreviewRegion(r.surfaceId))
   rebuildMesh(mesh, modelRoot, state.regions)
 }
 

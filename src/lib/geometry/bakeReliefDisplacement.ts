@@ -15,31 +15,57 @@ import {
   samplePatternHeightAtWorld,
 } from '../textures/projectionMapping'
 import {
+  applyContrast,
+  applyRoundedProfile,
+  getExportUnitScale,
+} from '../textures/patternPlacementMath'
+import {
   currentTrianglesForPristineSelection,
-  subdivideSelectedTriangles,
-  subdivisionLevelsForQuality,
+  estimateReliefSubdivisionIterations,
+  subdivideForReliefPattern,
+  type SubdivisionQuality,
 } from './subdivideSelection'
 import type { PatternMode } from '../../types/pattern'
 import { clamp01 } from '../textures/heightMapSampler'
+import { yieldIfBusy } from '../export/exportProgress'
 
 const _pos = new Vector3()
 const _n = new Vector3()
 const _pw = new Vector3()
-const _edge1 = new Vector3()
-const _edge2 = new Vector3()
-const _faceN = new Vector3()
+const _vA = new Vector3()
+const _vB = new Vector3()
+const _vC = new Vector3()
 const _matrixWorld = new Matrix4()
+const _invMatrixWorld = new Matrix4()
 
 const BOUNDARY_FALLOFF = 0.06
-const QUANT = 1e4
+const VERTEX_QUANT = 1e5
 
+/**
+ * Displacement along the surface normal from a luminance height sample.
+ * Built-in patterns use dark ink on white; the invert setting flips which tones
+ * count as raised features. Matches shader preview emboss/engrave intent.
+ */
 export function getEmbossDisplacement(
   height: number,
   mode: PatternMode,
   depthWorld: number,
+  inverted = false,
 ): number {
   const h = clamp01(height)
-  return mode === 'engrave' ? (1 - h) * depthWorld : h * depthWorld
+  const ink = inverted ? h : 1 - h
+  const raised = mode === 'engrave' ? 1 - ink : ink
+  return raised * depthWorld
+}
+
+function shapeReliefHeight(raw: number, smoothing: number): number {
+  let h = applyRoundedProfile(applyContrast(raw))
+  const sm = clamp01(smoothing)
+  if (sm > 0) {
+    const softened = h * h * (3 - 2 * h)
+    h = h * (1 - sm) + softened * sm
+  }
+  return h
 }
 
 function collectTriangleVertices(geometry: BufferGeometry, tris: Set<number>): Set<number> {
@@ -133,49 +159,13 @@ function buildPristineWorldBuffer(mesh: Mesh, pristineGeometry: BufferGeometry):
   return buf
 }
 
-function buildSmoothNormals(
-  geometry: BufferGeometry,
-  affectedVerts: Set<number>,
-): Map<number, Vector3> {
-  const pos = geometry.getAttribute('position') as BufferAttribute
-  const index = geometry.index
-  if (!index) return new Map()
+function vertexPositionKey(pos: BufferAttribute, vi: number): string {
+  return `${Math.round(pos.getX(vi) * VERTEX_QUANT)}:${Math.round(pos.getY(vi) * VERTEX_QUANT)}:${Math.round(pos.getZ(vi) * VERTEX_QUANT)}`
+}
 
-  const idMap = new Map<string, number>()
-  const vertexId = new Map<number, number>()
-  let nextId = 0
-
-  for (const vi of affectedVerts) {
-    const key = `${Math.round(pos.getX(vi) * QUANT)}_${Math.round(pos.getY(vi) * QUANT)}_${Math.round(pos.getZ(vi) * QUANT)}`
-    let id = idMap.get(key)
-    if (id === undefined) {
-      id = nextId++
-      idMap.set(key, id)
-    }
-    vertexId.set(vi, id)
-  }
-
-  const accum = Array.from({ length: nextId }, () => new Vector3())
-  for (let t = 0; t < index.count / 3; t++) {
-    const ia = index.getX(t * 3)
-    const ib = index.getX(t * 3 + 1)
-    const ic = index.getX(t * 3 + 2)
-    if (!affectedVerts.has(ia) && !affectedVerts.has(ib) && !affectedVerts.has(ic)) continue
-
-    _edge1.set(pos.getX(ib), pos.getY(ib), pos.getZ(ib)).sub(_pos.set(pos.getX(ia), pos.getY(ia), pos.getZ(ia)))
-    _edge2.set(pos.getX(ic), pos.getY(ic), pos.getZ(ic)).sub(_pos)
-    _faceN.crossVectors(_edge1, _edge2)
-
-    for (const vi of [ia, ib, ic]) {
-      const id = vertexId.get(vi)
-      if (id !== undefined) accum[id]!.add(_faceN)
-    }
-  }
-
-  const smoothById = accum.map((n) => (n.lengthSq() > 1e-12 ? n.normalize() : n.set(0, 0, 1)))
-  const result = new Map<number, Vector3>()
-  for (const [vi, id] of vertexId) result.set(vi, smoothById[id]!.clone())
-  return result
+function getLocalRegionNormal(mesh: Mesh, region: PatternRegion): Vector3 {
+  _invMatrixWorld.copy(mesh.matrixWorld).invert()
+  return region.normal.clone().transformDirection(_invMatrixWorld).normalize()
 }
 
 export interface BakeReliefParams {
@@ -184,18 +174,35 @@ export interface BakeReliefParams {
   geometry: BufferGeometry
   pristineGeometry: BufferGeometry
   region: PatternRegion
-  quality: 'preview' | 'apply'
+  quality: SubdivisionQuality
+  exportUnitScale?: number
   pristineTriMap: number[]
   pristineWorldBuffer: Float32Array
 }
 
-export function bakeReliefIntoGeometry(params: BakeReliefParams): BakeReliefParams {
+export async function bakeReliefIntoGeometry(
+  params: BakeReliefParams,
+  onSubdivideProgress?: (fraction: number) => void,
+): Promise<BakeReliefParams> {
   let geometry = params.geometry
   const { mesh, modelRoot, pristineGeometry, region, quality } = params
   if (!region.settings.patternId) return params
 
   mesh.updateWorldMatrix(true, false)
   _matrixWorld.copy(mesh.matrixWorld)
+
+  const mappingMode = region.mappingMode ?? region.selectionType
+
+  if (import.meta.env.DEV) {
+    console.log(
+      '[3MF export] mapping mode:',
+      mappingMode,
+      'region:',
+      region.surfaceId,
+      'pristineTriMap length:',
+      params.pristineTriMap.length,
+    )
+  }
 
   const modelMaxDim = getModelMaxDimension(modelRoot)
   const depthWorld = depthLevelToDisplacementWorld(region.settings.depth, modelMaxDim)
@@ -207,16 +214,82 @@ export function bakeReliefIntoGeometry(params: BakeReliefParams): BakeReliefPara
     pristineSelection,
   )
 
-  const subdiv = subdivideSelectedTriangles(
+  const projection = buildProjectionForMesh(
+    mesh,
+    region.normal,
+    region.anchor,
+    region.triangleIndices,
+    pristineGeometry,
+  )
+
+  const boundsTriangles =
+    mappingMode === 'part'
+      ? (region.cubicBoundsTriangles ?? region.triangleIndices)
+      : region.triangleIndices
+  const bounds = computePatternBounds(mesh, pristineGeometry, boundsTriangles)
+
+  const exportUnitScale = params.exportUnitScale ?? getExportUnitScale(modelRoot)
+  const exportQuality = quality === 'preview' ? 'high' : quality
+  const mappingCtx = createProjectionContext(
+    region.settings.patternId,
+    region.settings,
+    mappingMode,
+    projection,
+    bounds,
+    exportUnitScale,
+    exportQuality,
+  )
+
+  const worldSampleNormal = region.normal.clone().normalize()
+  const reliefSmoothing = Math.max(region.settings.smoothing ?? 0, 0.35)
+
+  const sampleReliefHeightAtVertex = (vertexIndex: number): number => {
+    const o = vertexIndex * 3
+    _pw.set(
+      params.pristineWorldBuffer[o]!,
+      params.pristineWorldBuffer[o + 1]!,
+      params.pristineWorldBuffer[o + 2]!,
+    )
+    const raw = samplePatternHeightAtWorld(_pw, worldSampleNormal, mappingCtx)
+    return shapeReliefHeight(raw, reliefSmoothing)
+  }
+
+  const patternDetail = {
+    patternId: region.settings.patternId,
+    scale: region.settings.scale,
+    projection,
+  }
+
+  if (import.meta.env.DEV) {
+    console.log(
+      '[3MF export] estimated subdivide iterations:',
+      estimateReliefSubdivisionIterations(
+        geometry,
+        currentSelection,
+        quality,
+        exportUnitScale,
+        patternDetail,
+      ),
+      'quality:',
+      quality,
+    )
+  }
+
+  const subdiv = await subdivideForReliefPattern(
     geometry,
     currentSelection,
-    subdivisionLevelsForQuality(geometry, currentSelection, quality),
-    params.pristineWorldBuffer,
     pristineSelection,
+    params.pristineWorldBuffer,
+    params.pristineTriMap,
+    sampleReliefHeightAtVertex,
+    exportQuality,
+    exportUnitScale,
+    patternDetail,
+    onSubdivideProgress,
   )
 
   if (subdiv.geometry !== geometry) {
-    if (geometry !== params.pristineGeometry) geometry.dispose()
+    if (geometry !== pristineGeometry) geometry.dispose()
     geometry = subdiv.geometry
   }
 
@@ -225,6 +298,13 @@ export function bakeReliefIntoGeometry(params: BakeReliefParams): BakeReliefPara
   params.pristineWorldBuffer = pwAttr
     ? (pwAttr.array as Float32Array)
     : params.pristineWorldBuffer
+
+  if (import.meta.env.DEV) {
+    const triCount = (geometry.index?.count ?? 0) / 3
+    if (params.pristineTriMap.length !== triCount) {
+      throw new Error('Subdivision parent map length mismatch after bake subdivide.')
+    }
+  }
 
   const index = geometry.index
   const pos = geometry.getAttribute('position') as BufferAttribute
@@ -235,43 +315,87 @@ export function bakeReliefIntoGeometry(params: BakeReliefParams): BakeReliefPara
     pristineSelection,
   )
   const affectedVerts = collectTriangleVertices(geometry, activeTris)
-
-  const projection = buildProjectionForMesh(
-    mesh,
-    region.normal,
-    region.anchor,
-    region.triangleIndices,
-    pristineGeometry,
-  )
-  const bounds = computePatternBounds(mesh, pristineGeometry, region.triangleIndices)
-  const mappingCtx = createProjectionContext(
-    region.settings.patternId,
-    region.settings,
-    region.selectionType,
-    projection,
-    bounds,
-  )
+  const affectedSet = affectedVerts
 
   const boundaryDist = buildBoundaryDistance(geometry, activeTris)
-  const smoothNormals = buildSmoothNormals(geometry, affectedVerts)
-  const pw = params.pristineWorldBuffer
+  const localDispNormal = getLocalRegionNormal(mesh, region)
 
-  for (const vi of affectedVerts) {
-    const o = vi * 3
-    _pw.set(pw[o]!, pw[o + 1]!, pw[o + 2]!)
+  const vertsByKey = new Map<string, number[]>()
+  for (const vi of affectedSet) {
+    const key = vertexPositionKey(pos, vi)
+    const group = vertsByKey.get(key)
+    if (group) group.push(vi)
+    else vertsByKey.set(key, [vi])
+  }
 
-    const localN = smoothNormals.get(vi)
-    if (!localN) continue
+  const smoothNormals = new Map<string, Vector3>()
+  const accum = new Map<string, { x: number; y: number; z: number; w: number }>()
 
-    _n.copy(localN).transformDirection(_matrixWorld).normalize()
-    const height = samplePatternHeightAtWorld(_pw, _n, mappingCtx)
+  let triIndex = 0
+  for (const t of activeTris) {
+    const ia = index.getX(t * 3)
+    const ib = index.getX(t * 3 + 1)
+    const ic = index.getX(t * 3 + 2)
+    _vA.set(pos.getX(ia), pos.getY(ia), pos.getZ(ia))
+    _vB.set(pos.getX(ib), pos.getY(ib), pos.getZ(ib))
+    _vC.set(pos.getX(ic), pos.getY(ic), pos.getZ(ic))
+    _n.subVectors(_vB, _vA).cross(_pw.subVectors(_vC, _vA))
+    const area = _n.length()
+    if (area < 1e-12) {
+      triIndex++
+      continue
+    }
+    _n.divideScalar(area)
+
+    for (const vi of [ia, ib, ic]) {
+      const key = vertexPositionKey(pos, vi)
+      let entry = accum.get(key)
+      if (!entry) {
+        entry = { x: 0, y: 0, z: 0, w: 0 }
+        accum.set(key, entry)
+      }
+      entry.x += _n.x * area
+      entry.y += _n.y * area
+      entry.z += _n.z * area
+      entry.w += area
+    }
+
+    triIndex++
+    if (triIndex % 4096 === 0) {
+      await yieldIfBusy()
+    }
+  }
+
+  for (const [key, entry] of accum) {
+    const len = Math.hypot(entry.x, entry.y, entry.z)
+    if (len > 1e-12) {
+      smoothNormals.set(key, new Vector3(entry.x / len, entry.y / len, entry.z / len))
+    }
+  }
+
+  let groupIndex = 0
+  for (const [key, vertIndices] of vertsByKey) {
+    const vi = vertIndices[0]!
+    const shapedHeight = sampleReliefHeightAtVertex(vi)
     const disp =
-      getEmbossDisplacement(height, region.settings.mode, depthWorld) *
-      boundaryFalloff(boundaryDist.get(vi))
+      getEmbossDisplacement(
+        shapedHeight,
+        region.settings.mode,
+        depthWorld,
+        region.settings.invert ?? false,
+      ) * boundaryFalloff(boundaryDist.get(vi))
 
-    _pos.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi))
-    _pos.addScaledVector(localN, disp)
-    pos.setXYZ(vi, _pos.x, _pos.y, _pos.z)
+    const dispNormal = smoothNormals.get(key) ?? localDispNormal
+    for (const v of vertIndices) {
+      _pos.set(pos.getX(v), pos.getY(v), pos.getZ(v))
+      _pos.addScaledVector(dispNormal, disp)
+      pos.setXYZ(v, _pos.x, _pos.y, _pos.z)
+    }
+
+    groupIndex++
+    if (groupIndex % 2048 === 0) {
+      await yieldIfBusy()
+    }
   }
 
   pos.needsUpdate = true

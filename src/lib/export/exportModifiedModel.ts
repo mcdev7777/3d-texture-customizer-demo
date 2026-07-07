@@ -2,10 +2,12 @@ import { STLExporter } from 'three/addons/exporters/STLExporter.js'
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js'
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
 import type { Object3D } from 'three'
-import type { ExportFormat } from '../../types/bake'
+import type { ExportFormat, ExportQuality } from '../../types/bake'
+import type { SurfacePatternPlacement } from '../../types/pattern'
 import { downloadBlob } from './downloadBlob'
-import { export3mf } from './export3mf'
-import { buildExportScene } from './buildExportScene'
+import { export3mfFast } from './export3mfFast'
+import { preparePrintableExport } from './preparePrintableExport'
+import { clampProgress, type ExportProgressCallback } from './exportProgress'
 import { disposeExportCloneGeometries } from '../three/scheduleDispose'
 
 function sanitizeFileName(name: string): string {
@@ -15,10 +17,6 @@ function sanitizeFileName(name: string): string {
 function defaultFileName(baseName: string, format: ExportFormat): string {
   const safe = sanitizeFileName(baseName)
   return `${safe}.${format}`
-}
-
-function prepareExportRoot(object: Object3D): Object3D {
-  return buildExportScene(object)
 }
 
 async function exportGlb(object: Object3D): Promise<ArrayBuffer> {
@@ -66,34 +64,68 @@ export async function exportModifiedModel(params: {
   object: Object3D
   format: ExportFormat
   fileName?: string
+  placements: Record<string, SurfacePatternPlacement>
+  committedSurfaceIds: readonly string[]
+  quality: ExportQuality
+  exportUnitScale: number
+  onProgress?: ExportProgressCallback
 }): Promise<void> {
-  const { object, format } = params
+  const { object, format, placements, committedSurfaceIds, quality, exportUnitScale, onProgress } =
+    params
   const baseName = params.fileName ?? 'textured-model'
-  const exportRoot = prepareExportRoot(object)
+
+  const report = (fraction: number, label: string) => {
+    onProgress?.(clampProgress(fraction), label)
+  }
+
+  report(0.01, 'Starting export…')
+
+  if (format === '3mf') {
+    const zip = await export3mfFast(object, {
+      placements,
+      committedSurfaceIds,
+      quality,
+      exportUnitScale,
+      onProgress: (fraction, label) => report(fraction, label),
+    })
+    const blob = new Blob([zip as BlobPart], {
+      type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml',
+    })
+    downloadBlob(blob, defaultFileName(baseName, '3mf'), blob.type)
+    return
+  }
+
+  const exportRoot = await preparePrintableExport(object, {
+    placements,
+    committedSurfaceIds,
+    quality,
+    exportUnitScale,
+    onProgress: (fraction, label) => {
+      report(0.02 + fraction * 0.88, label)
+    },
+  })
 
   try {
     switch (format) {
       case 'glb': {
+        report(0.92, 'Writing GLB…')
         const buffer = await exportGlb(exportRoot)
+        report(1, 'Download ready')
         downloadBlob(buffer, defaultFileName(baseName, 'glb'), 'model/gltf-binary')
         break
       }
       case 'stl': {
+        report(0.92, 'Writing STL…')
         const buffer = exportStl(exportRoot)
+        report(1, 'Download ready')
         downloadBlob(buffer, defaultFileName(baseName, 'stl'), 'application/octet-stream')
         break
       }
       case 'obj': {
+        report(0.92, 'Writing OBJ…')
         const text = exportObj(exportRoot)
+        report(1, 'Download ready')
         downloadBlob(text, defaultFileName(baseName, 'obj'), 'text/plain')
-        break
-      }
-      case '3mf': {
-        const zip = export3mf(exportRoot)
-        const blob = new Blob([zip as BlobPart], {
-          type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml',
-        })
-        downloadBlob(blob, defaultFileName(baseName, '3mf'), blob.type)
         break
       }
       default: {
@@ -102,7 +134,6 @@ export async function exportModifiedModel(params: {
       }
     }
   } finally {
-    // Dispose cloned geometries only — materials/textures are shared with the live scene.
     disposeExportCloneGeometries(exportRoot)
   }
 }

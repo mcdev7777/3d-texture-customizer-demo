@@ -12,8 +12,8 @@ export function FloorGrid() {
   if (!showGrid) return null
 
   return (
-    <group position={[0, -0.01, 0]}>
-      <Plane args={[20, 20]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <group position={[0, 0, -0.01]}>
+      <Plane args={[20, 20]} receiveShadow>
         <meshStandardMaterial color={matColor} roughness={0.95} metalness={0.05} />
       </Plane>
       <Grid
@@ -28,7 +28,8 @@ export function FloorGrid() {
         fadeStrength={1.2}
         followCamera={false}
         infiniteGrid={false}
-        position={[0, 0.001, 0]}
+        rotation={[Math.PI / 2, 0, 0]}
+        position={[0, 0, 0.001]}
       />
     </group>
   )
