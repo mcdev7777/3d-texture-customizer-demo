@@ -1,11 +1,9 @@
-import type { Object3D } from 'three'
 import type { ExportQuality } from '../../../types/bake'
 import type { PatternRegion } from '../../materials/patternMaterialApply'
 import {
   computeReliefEdgeTargets,
   getExportOutputTriangles,
 } from '../../geometry/subdivideSelection'
-import { depthLevelToDisplacementWorld, getModelMaxDimension } from '../../pattern/patternDepth'
 import type {
   EngineBounds,
   EngineLayerSettings,
@@ -72,36 +70,35 @@ function rawFineEdgeMm(quality: ExportQuality, region: PatternRegion, bounds: En
   return fineEdge
 }
 
-/** Per-region displacement pass settings (texture mapping/amplitude — everything BUT the shared pipeline knobs). */
-export function buildLayerSettings(
-  region: PatternRegion,
-  modelRoot: Object3D,
-  exportUnitScale: number,
-): EngineLayerSettings {
-  const modelMaxDim = getModelMaxDimension(modelRoot)
-  const depthWorld = depthLevelToDisplacementWorld(region.settings.depth, modelMaxDim) * exportUnitScale
+/**
+ * Per-region displacement pass settings (texture mapping/amplitude —
+ * everything BUT the shared pipeline knobs).
+ *
+ * `amplitude` is in whatever linear unit the pipeline's `positions` soup is
+ * in (mm for a real export, viewer-normalized units for an in-app 3D
+ * preview bake) — callers convert the mm-native depth value via
+ * `depthLevelToDisplacementMm` (export) or `depthLevelToDisplacementWorld`
+ * (viewer space) before calling this.
+ */
+export function buildLayerSettings(region: PatternRegion, amplitude: number): EngineLayerSettings {
   const settings = region.settings
 
-  // BumpMesh's mapping.js treats scaleU/scaleV as a UV *divisor*
-  // (uu = u / scaleU — bigger scaleU spreads one tile over more world space,
-  // i.e. fewer repeats), but this app's "Scale" slider is a repeat-density
-  // *multiplier* everywhere else (the live preview shader sets
-  // patternRepeatScale = settings.scale directly and multiplies it into the
-  // UV — see patternShaderMaterial.ts). The two conventions are inverses of
-  // each other. Using settings.scale directly as scaleU (as before) made
-  // higher "Scale" values divide the UV by a *bigger* number — fewer
-  // repeats, the opposite of every other scale control in the app — until
-  // by ~2-3 the pattern was down to a single tile (or less) regardless of
-  // how much higher the slider went. Inverting here (0.5/scale instead of
-  // scale*0.5) restores "higher scale = more repeats"; the two formulas
-  // agree exactly at scale=1, which is why the bug was invisible there.
-  const scaleUV = 0.5 / Math.max(0.05, settings.scale)
+  // "Scale" is a tile-size multiplier: scale 1 = one tile fills the
+  // selection; scale 0.5 = each tile is half-size, so a 2x2 = 4 tiles fill
+  // the selection instead; scale 2 = each tile is twice the selection size
+  // (zoomed in on part of one tile). BumpMesh's mapping.js already divides
+  // (uu = u / scaleU), so passing scale straight through as scaleU gives
+  // exactly that: repeats-across-selection = 1/scaleU = 1/scale. This must
+  // stay the same convention the live preview shader uses (patternShaderMaterial.ts
+  // divides pu by patternRepeatScale for the same reason) so 2D preview and
+  // 3D/export show the same tiling for the same scale value.
+  const scaleUV = Math.max(0.05, settings.scale)
 
   return {
     mappingMode: mapSelectionToMappingMode(region),
     scaleU: scaleUV,
     scaleV: scaleUV,
-    amplitude: Math.max(depthWorld, 1e-6),
+    amplitude: Math.max(amplitude, 1e-6),
     offsetU: settings.offsetX,
     offsetV: settings.offsetY,
     rotation: settings.rotation,

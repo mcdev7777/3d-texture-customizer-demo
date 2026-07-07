@@ -1,6 +1,7 @@
 import { Hammer, Eye, EyeOff, AlertTriangle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
 import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
+import { ToggleRow } from '../ui/ToggleRow'
 import { useAppStore } from '../../store/useAppStore'
 import { usePatternStore } from '../../store/usePatternStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
@@ -21,6 +22,9 @@ export function BakeExportPanel() {
   const applyTexture = useBakeStore((s) => s.applyTexture)
   const setPreviewActive = useBakeStore((s) => s.setPreviewActive)
   const resetAll = useBakeStore((s) => s.resetAll)
+  const show3DPreview = useBakeStore((s) => s.show3DPreview)
+  const show3DPreviewBusy = useBakeStore((s) => s.show3DPreviewBusy)
+  const setShow3DPreview = useBakeStore((s) => s.setShow3DPreview)
 
   const selectedPlacement = selectedSurface ? placements[selectedSurface.surfaceId] : undefined
   const selectedHasPattern = !!selectedPlacement?.settings.patternId
@@ -105,6 +109,22 @@ export function BakeExportPanel() {
             ? ` Applies to all ${selectionCount} selected regions at once.`
             : ' Part mode maps all faces; surface mode maps the selected face only.'}
         </p>
+
+        <div className="pt-2 border-t border-purple-500/10">
+          <ToggleRow
+            label="3D Preview"
+            checked={show3DPreview}
+            onChange={setShow3DPreview}
+            disabled={!hasApplied}
+          />
+          <p className="text-[10px] text-slate-500 -mt-1">
+            {show3DPreviewBusy
+              ? 'Baking real geometry…'
+              : show3DPreview
+                ? 'Applied patterns show as real extruded/embossed geometry — those surfaces can’t be selected while this is on.'
+                : 'Shows applied patterns as real 3D relief (adds/removes material) instead of shading only.'}
+          </p>
+        </div>
 
         <div className="pt-2 border-t border-purple-500/10">
           <Button

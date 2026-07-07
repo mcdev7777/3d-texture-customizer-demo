@@ -21,9 +21,20 @@ interface BakeState {
   /** True while a background export job is running (does not block other UI). */
   exportActive: boolean
   exportProgress: ExportProgressState | null
+  /**
+   * Shows applied (committed) patterns as real extruded/embossed 3D geometry
+   * instead of the flat 2D bump-shaded preview. Those surfaces become
+   * non-selectable while this is on — only original, unpatterned surfaces
+   * can still be picked. Actual baking is driven by Pattern3DPreviewOverlay.
+   */
+  show3DPreview: boolean
+  /** True while the 3D preview overlay is (re)baking geometry in the background. */
+  show3DPreviewBusy: boolean
 
   setPreviewActive: (active: boolean) => void
   setExportQuality: (quality: ExportQuality) => void
+  setShow3DPreview: (show: boolean) => void
+  setShow3DPreviewBusy: (busy: boolean) => void
   applyTexture: () => Promise<boolean>
   exportModel: (format: ExportFormat) => Promise<boolean>
   removeCommitted: (surfaceId: string) => void
@@ -42,10 +53,16 @@ export const useBakeStore = create<BakeState>((set, get) => {
   exportQuality: DEFAULT_EXPORT_QUALITY,
   exportActive: false,
   exportProgress: null,
+  show3DPreview: false,
+  show3DPreviewBusy: false,
 
   setPreviewActive: (active) => set({ previewActive: active }),
 
   setExportQuality: (quality) => set({ exportQuality: quality }),
+
+  setShow3DPreview: (show) => set({ show3DPreview: show }),
+
+  setShow3DPreviewBusy: (busy) => set({ show3DPreviewBusy: busy }),
 
   applyTexture: async () => {
     if (get().status === 'applying') return false
@@ -206,6 +223,8 @@ export const useBakeStore = create<BakeState>((set, get) => {
       previewActive: false,
       exportActive: false,
       exportProgress: null,
+      show3DPreview: false,
+      show3DPreviewBusy: false,
     })
   },
   }

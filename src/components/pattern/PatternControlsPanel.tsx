@@ -162,7 +162,7 @@ export function PatternControlsPanel() {
             min={DEPTH_MIN}
             max={DEPTH_MAX}
             step={0.05}
-            format={(v) => v.toFixed(2)}
+            format={(v) => `${v.toFixed(2)}mm`}
             onChange={(v) => patch({ depth: v })}
           />
 

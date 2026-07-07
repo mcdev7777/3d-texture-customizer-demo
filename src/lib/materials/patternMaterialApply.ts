@@ -2,6 +2,7 @@ import {
   BufferGeometry,
   Material,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Vector3,
   type Object3D,
@@ -148,12 +149,27 @@ function getOriginalMaterial(state: MeshPatternState): Material {
   return mat ?? new MeshStandardMaterial()
 }
 
+// Mesh UUIDs whose *committed* (not in-progress preview) regions should
+// render invisible on the original mesh — used by 3D Preview mode, which
+// shows a separate real-geometry overlay in their place instead. Colour and
+// depth writes are both off so the invisible surface can't occlude the
+// overlay or leave a depth-buffer shadow; the geometry itself is untouched
+// so raycasting/selection against the rest of the mesh is unaffected.
+const hiddenCommittedMeshes = new Set<string>()
+
+function createInvisibleMaterial(): Material {
+  return new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+}
+
 function createRegionMaterial(
   mesh: Mesh,
   modelRoot: Object3D,
   state: MeshPatternState,
   region: PatternRegion,
 ): Material {
+  if (hiddenCommittedMeshes.has(mesh.uuid) && !isPreviewRegion(region.surfaceId)) {
+    return createInvisibleMaterial()
+  }
   const baseMaterial = resolveMeshRegionMaterial(
     state.pristineGeometry,
     state.pristineMaterial,
@@ -667,6 +683,38 @@ export function commitPatternMaterial(
   rebuildMesh(mesh, modelRoot, state.regions)
 }
 
+/**
+ * Toggle whether `mesh`'s committed (applied) regions render invisible on
+ * the original mesh — used by 3D Preview mode, which shows a real
+ * geometry-displaced overlay in their place. In-progress (not-yet-applied)
+ * preview regions on the same mesh are unaffected, so a surface being
+ * actively edited keeps showing its normal 2D bump preview.
+ */
+export function setCommittedRegionsHiddenForMesh(
+  modelRoot: Object3D,
+  meshUuid: string,
+  hidden: boolean,
+): void {
+  if (hidden) hiddenCommittedMeshes.add(meshUuid)
+  else hiddenCommittedMeshes.delete(meshUuid)
+
+  const mesh = findMeshByUuid(modelRoot, meshUuid)
+  const state = meshStates.get(meshUuid)
+  if (!mesh || !state) return
+  rebuildMesh(mesh, modelRoot, state.regions)
+}
+
+/** True when `faceIndex` (pristine indexing) belongs to an already-committed (applied) region on `mesh`. */
+export function isTriangleInCommittedRegion(mesh: Mesh, faceIndex: number): boolean {
+  const state = meshStates.get(mesh.uuid)
+  if (!state) return false
+  for (const region of state.regions) {
+    if (isPreviewRegion(region.surfaceId)) continue
+    if (region.triangleIndices.includes(faceIndex)) return true
+  }
+  return false
+}
+
 export function resetMeshPatterns(mesh: Mesh): void {
   const state = meshStates.get(mesh.uuid)
   if (!state) return
@@ -679,6 +727,7 @@ export function resetMeshPatterns(mesh: Mesh): void {
   disposeMeshPatternState(state)
   unregisterMeshPristineGeometry(mesh.uuid)
   meshStates.delete(mesh.uuid)
+  hiddenCommittedMeshes.delete(mesh.uuid)
 }
 
 export function resetAllPatterns(modelRoot: Object3D | null): void {

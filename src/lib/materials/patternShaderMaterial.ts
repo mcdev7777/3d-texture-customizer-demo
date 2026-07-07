@@ -19,8 +19,8 @@ import type { SelectionMode } from '../../types/surfaceSelection'
 import type { SurfacePatternSettings } from '../../types/pattern'
 import { DEPTH_MAX } from '../../types/pattern'
 import { createSurfaceProjectionFromHighlight, type SurfaceProjection } from '../geometry/surfaceProjection'
-import { getSelectionTileWorld } from '../textures/patternPlacementMath'
-import { depthLevelToDisplacementWorld, getModelMaxDimension } from '../pattern/patternDepth'
+import { getExportUnitScale, getSelectionTileWorld } from '../textures/patternPlacementMath'
+import { depthLevelToDisplacementWorld } from '../pattern/patternDepth'
 import { getPatternTexture, getPatternTextureAspect } from './patternTexture'
 import { computePatternBounds, type PatternBounds } from './patternBounds'
 
@@ -45,6 +45,11 @@ uniform vec3 patternBitangentWorld;
 uniform float patternTileWorld;
 uniform float patternSelectionWidth;
 uniform float patternSelectionHeight;
+// Pattern "Scale": a *size* multiplier, matching how scale works everywhere
+// else in the app (image/texture editors, CAD) — scale 2 = each tile twice
+// as big (fewer repeats across the selection); scale 0.5 = each tile half
+// as big (more repeats — e.g. a 2x2 grid of tiles across the selection).
+// UV is divided by it, not multiplied.
 uniform float patternRepeatScale;
 uniform float patternRotationRad;
 uniform vec2 patternOffsetUV;
@@ -89,8 +94,8 @@ float patternHeightPlanar(vec3 pos) {
   vec3 rel = pos - patternOriginWorld;
   float uWorld = dot(rel, patternTangentWorld);
   float vWorld = dot(rel, patternBitangentWorld);
-  float pu = (uWorld / max(patternSelectionWidth, 1e-4) + 0.5) * patternRepeatScale;
-  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) * patternRepeatScale;
+  float pu = (uWorld / max(patternSelectionWidth, 1e-4) + 0.5) / patternRepeatScale;
+  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) / patternRepeatScale;
   return patternSampleMap(vec2(pu, pv));
 }
 
@@ -104,9 +109,9 @@ float patternHeightCubic(vec3 pos, vec3 projN) {
   float xyU = (pos.x - patternBoundsMin.x) / md;
   if (projN.z < 0.0) xyU = -xyU;
 
-  float hXY = patternSampleMap(vec2(xyU * patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) * patternRepeatScale));
-  float hXZ = patternSampleMap(vec2(xzU * patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) * patternRepeatScale));
-  float hYZ = patternSampleMap(vec2(yzU * patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) * patternRepeatScale));
+  float hXY = patternSampleMap(vec2(xyU / patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) / patternRepeatScale));
+  float hXZ = patternSampleMap(vec2(xzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScale));
+  float hYZ = patternSampleMap(vec2(yzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScale));
 
   vec3 wts = patternCubicBlendWeights(projN);
   return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
@@ -199,8 +204,7 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
 
   const aspect = getPatternTextureAspect(patternId)
   const tileWorld = getSelectionTileWorld(projection, aspect.u, aspect.v, settings.scale)
-  const modelMaxDim = getModelMaxDimension(modelRoot)
-  const amplitude = depthLevelToDisplacementWorld(settings.depth, modelMaxDim)
+  const amplitude = depthLevelToDisplacementWorld(settings.depth, getExportUnitScale(modelRoot))
   const b = bounds ?? {
     min: new Vector3(),
     max: new Vector3(1, 1, 1),
