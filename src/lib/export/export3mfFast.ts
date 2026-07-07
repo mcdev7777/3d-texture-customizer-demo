@@ -102,8 +102,8 @@ export async function export3mfFast(
     const committedTris = collectCommittedTriangles(regions.map((r) => r.triangleIndices))
     const faceWeights = buildFaceWeights(triangleCount, committedTris)
     const texture = buildDisplacementTexture(primary.settings.patternId, primary.settings, quality)
-    const settings = buildEngineSettings(primary, quality, root, exportUnitScale)
     const bounds = computeEngineBounds(positions)
+    const settings = buildEngineSettings(primary, quality, root, exportUnitScale, bounds, positions)
 
     onProgress?.(
       0.04 + (meshIndex / exportMeshes.length) * 0.02,

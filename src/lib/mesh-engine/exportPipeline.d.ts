@@ -34,6 +34,12 @@ export interface EngineSettings {
   boundaryFalloff: number
   invertDisplacement: boolean
   symmetricDisplacement: boolean
+  /** Cubic-mapping seam blend amount (0 = hard axis cutoff, 1 = full triplanar-style blend). */
+  mappingBlend: number
+  /** Width of the blend zone around a cubic-mapping seam. */
+  seamBandWidth: number
+  /** Laplacian smoothing iterations on the per-vertex blend normal that drives cubic/triplanar blend weights. */
+  blendNormalSmoothing: number
 }
 
 export interface PipelineInput {
