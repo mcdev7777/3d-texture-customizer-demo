@@ -1,29 +1,39 @@
 import {
+  BufferAttribute,
   BufferGeometry,
   Float32BufferAttribute,
   Group,
-  Matrix4,
   Mesh,
   MeshStandardMaterial,
-  Vector3,
   type Material,
   type Object3D,
 } from 'three'
 import type { SurfacePatternPlacement } from '../../types/pattern'
 import type { ExportQuality } from '../../types/bake'
 import { extractBaseColor } from '../materials/extractBaseColor'
-import { bakePatternsForExport } from '../materials/patternMaterialApply'
+import { collectAllExportRegionsForMesh } from '../materials/patternMaterialApply'
+import { getExportOutputTriangles } from '../geometry/subdivideSelection'
 import {
-  getExportOutputTriangles,
-} from '../geometry/subdivideSelection'
+  buildLayerSettings,
+  buildPipelineSettings,
+  buildRegularizeOpts,
+} from '../mesh-engine/adapters/engineSettings'
+import { buildDisplacementTexture } from '../mesh-engine/adapters/engineTexture'
+import {
+  buildFaceWeights,
+  buildTriangleSet,
+  collectCommittedTriangles,
+} from '../mesh-engine/adapters/engineFaceMask'
+import { computeEngineBounds } from '../mesh-engine/adapters/engineBounds'
+import {
+  collectExportMeshes,
+  collectMeshTriangleSoup,
+  isExportExcluded,
+} from '../mesh-engine/adapters/collectMeshPositions'
+import { mapPipelineProgress, runMeshPipeline } from '../mesh-engine/adapters/runMeshPipeline'
+import type { EngineLayer } from '../mesh-engine/exportPipeline'
 import { logExportGeometryStats } from './exportDiagnostics'
-import {
-  type ExportProgressCallback,
-  yieldIfBusy,
-  yieldToMain,
-} from './exportProgress'
-
-const _v = new Vector3()
+import { type ExportProgressCallback, yieldToMain } from './exportProgress'
 
 export interface PrintableExportOptions {
   placements: Record<string, SurfacePatternPlacement>
@@ -38,30 +48,6 @@ function resolveMaterial(material: Material | Material[]): Material {
     return material.find(Boolean) ?? new MeshStandardMaterial()
   }
   return material ?? new MeshStandardMaterial()
-}
-
-async function bakeWorldTransform(geometry: BufferGeometry, matrixWorld: Matrix4): Promise<void> {
-  const pos = geometry.getAttribute('position')
-  if (!pos) return
-  const chunk = 12_000
-  for (let i = 0; i < pos.count; i++) {
-    _v.fromBufferAttribute(pos, i).applyMatrix4(matrixWorld)
-    pos.setXYZ(i, _v.x, _v.y, _v.z)
-    if (i > 0 && i % chunk === 0) await yieldIfBusy()
-  }
-  pos.needsUpdate = true
-}
-
-async function applyExportUnitScale(geometry: BufferGeometry, scale: number): Promise<void> {
-  if (!Number.isFinite(scale) || Math.abs(scale - 1) < 1e-9) return
-  const pos = geometry.getAttribute('position')
-  if (!pos) return
-  const chunk = 12_000
-  for (let i = 0; i < pos.count; i++) {
-    pos.setXYZ(i, pos.getX(i) * scale, pos.getY(i) * scale, pos.getZ(i) * scale)
-    if (i > 0 && i % chunk === 0) await yieldIfBusy()
-  }
-  pos.needsUpdate = true
 }
 
 function ensureVertexColors(geometry: BufferGeometry, material: Material): void {
@@ -81,7 +67,7 @@ function ensureVertexColors(geometry: BufferGeometry, material: Material): void 
 function countSourceTriangles(root: Object3D): number {
   let count = 0
   root.traverse((object) => {
-    if (object.userData?.isPreview || object.userData?.isHelper) return
+    if (isExportExcluded(object)) return
     if (!('isMesh' in object) || !(object as Mesh).isMesh) return
     const mesh = object as Mesh
     if (!mesh.visible || !mesh.geometry) return
@@ -91,29 +77,17 @@ function countSourceTriangles(root: Object3D): number {
   return count
 }
 
-function collectExportMeshes(root: Object3D): Mesh[] {
-  const meshes: Mesh[] = []
-  root.traverse((object) => {
-    if (object.userData?.isPreview || object.userData?.isHelper) return
-    if (!('isMesh' in object) || !(object as Mesh).isMesh) return
-    const mesh = object as Mesh
-    if (!mesh.visible || !mesh.geometry) return
-    meshes.push(mesh)
-  })
-  return meshes
-}
-
-function meshHasCommittedPatterns(
-  mesh: Mesh,
-  committedSurfaceIds: readonly string[],
-): boolean {
-  return committedSurfaceIds.some((surfaceId) => surfaceId.startsWith(`${mesh.uuid}:`))
-}
-
 /**
- * Clone the scene, bake all committed pattern regions into geometry, decimate to
- * the quality target, restore millimeter dimensions, and return a temporary export
- * root. Does not modify the live scene.
+ * Clone the scene, bake all committed pattern regions into geometry via the
+ * same fast worker-backed mesh-engine pipeline 3MF export uses (subdivide →
+ * displace per-region → decimate), restore millimeter dimensions, and return
+ * a temporary export root. Does not modify the live scene.
+ *
+ * Previously routed through a separate, main-thread-only, per-region TS bake
+ * path (bakeReliefIntoGeometry/subdivideForReliefPattern) with no worker and
+ * none of the mesh-engine's adaptive-resolution/triangle-budget tuning —
+ * several times slower for the same detail level. STL/OBJ/GLB now share the
+ * exact pipeline call 3MF uses; only the final packaging step differs.
  */
 export async function preparePrintableExport(
   root: Object3D,
@@ -136,43 +110,89 @@ export async function preparePrintableExport(
   const exportRoot = new Group()
   exportRoot.name = 'ExportRoot'
 
+  let exportToken = 0
+  const myToken = ++exportToken
+  const isStale = () => exportToken !== myToken
+
   for (let meshIndex = 0; meshIndex < exportMeshes.length; meshIndex++) {
-    const source = exportMeshes[meshIndex]!
+    const mesh = exportMeshes[meshIndex]!
     const meshFraction = meshIndex / exportMeshes.length
     const nextMeshFraction = (meshIndex + 1) / exportMeshes.length
     const bakeStart = 0.05 + meshFraction * 0.82
     const bakeEnd = 0.05 + nextMeshFraction * 0.82
-    const hasPatterns = meshHasCommittedPatterns(source, committedSurfaceIds)
+
+    const regions = collectAllExportRegionsForMesh(mesh, root, placements, committedSurfaceIds)
+    const patternedRegions = regions.filter((r) => r.settings.patternId)
+    const { positions, triangleCount } = collectMeshTriangleSoup(mesh, exportUnitScale)
 
     onProgress?.(
       bakeStart,
       exportMeshes.length > 1
         ? `Processing mesh ${meshIndex + 1}/${exportMeshes.length}…`
-        : hasPatterns
+        : patternedRegions.length > 0
           ? 'Baking relief geometry…'
           : 'Copying mesh…',
     )
     await yieldToMain()
 
-    let geometry = await bakePatternsForExport(
-      source,
-      root,
-      placements,
-      committedSurfaceIds,
-      quality,
-      exportUnitScale,
-      hasPatterns
-        ? (fraction, label) => {
-            onProgress?.(bakeStart + (bakeEnd - bakeStart) * fraction, label)
-          }
-        : undefined,
-    )
+    let finalPositions = positions
+    let finalNormals: Float32Array | null = null
 
-    await bakeWorldTransform(geometry, source.matrixWorld)
-    await applyExportUnitScale(geometry, exportUnitScale)
-    geometry.computeVertexNormals()
+    if (patternedRegions.length > 0) {
+      const layers: EngineLayer[] = patternedRegions.map((region) => {
+        const texture = buildDisplacementTexture(region.settings.patternId!, region.settings, quality)
+        return {
+          triangleSet: buildTriangleSet(triangleCount, region.triangleIndices),
+          imageData: texture.imageData,
+          imgWidth: texture.width,
+          imgHeight: texture.height,
+          settings: buildLayerSettings(region, root, exportUnitScale),
+        }
+      })
 
-    const material = resolveMaterial(source.material)
+      const committedTris = collectCommittedTriangles(patternedRegions.map((r) => r.triangleIndices))
+      const faceWeights = buildFaceWeights(triangleCount, committedTris)
+      const bounds = computeEngineBounds(positions)
+      const settings = buildPipelineSettings(patternedRegions, quality, bounds, positions)
+
+      const result = await runMeshPipeline(
+        {
+          positions,
+          faceWeights,
+          imageData: layers[0]!.imageData,
+          imgWidth: layers[0]!.imgWidth,
+          imgHeight: layers[0]!.imgHeight,
+          settings,
+          bounds,
+          regularizeOpts: buildRegularizeOpts(),
+          mode: 'export',
+          layers,
+        },
+        mapPipelineProgress(
+          (fraction, label) => onProgress?.(bakeStart + (bakeEnd - bakeStart) * fraction, label),
+          0,
+          1,
+        ),
+        isStale,
+      )
+
+      if (!result || isStale()) {
+        throw new Error('Export was cancelled.')
+      }
+
+      finalPositions = result.positions
+      finalNormals = result.normals
+    }
+
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new BufferAttribute(finalPositions, 3))
+    if (finalNormals) {
+      geometry.setAttribute('normal', new BufferAttribute(finalNormals, 3))
+    } else {
+      geometry.computeVertexNormals()
+    }
+
+    const material = resolveMaterial(mesh.material)
     ensureVertexColors(geometry, material)
 
     const exportMat = new MeshStandardMaterial({
@@ -182,7 +202,7 @@ export async function preparePrintableExport(
     })
 
     const exportMesh = new Mesh(geometry, exportMat)
-    exportMesh.name = source.name || 'Mesh'
+    exportMesh.name = mesh.name || 'Mesh'
     exportRoot.add(exportMesh)
   }
 
@@ -191,7 +211,7 @@ export async function preparePrintableExport(
 
   if (import.meta.env.DEV) {
     console.log(
-      '[3MF export] quality target triangles:',
+      '[printable export] quality target triangles:',
       getExportOutputTriangles(quality).toLocaleString(),
     )
   }

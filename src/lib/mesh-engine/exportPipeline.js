@@ -191,6 +191,7 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
   const { settings, regularizeOpts } = input;
   const mode = input.mode === 'bake' ? 'bake' : 'export';
   const bounds = reviveBounds(input.bounds);
+  const layers = mode === 'export' && input.layers && input.layers.length > 0 ? input.layers : null;
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(input.positions, 3));
@@ -215,15 +216,14 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
     if (shouldAbort()) return null;
 
     // Regularize sub-slivers, then re-subdivide stretched edges. Skipped when
-    // the Advanced toggle is off. Export mode passes a zero parent map (it
-    // doesn't consume parents); bake mode threads + composes the real one.
+    // the Advanced toggle is off. Bake mode always needed the composed parent
+    // map; export mode now also needs it when baking multiple pattern layers
+    // (each layer's post-subdivision mask is derived from parent ancestry),
+    // so it's composed unconditionally — cheap relative to the rest of the pass.
     if (settings.regularizeEnabled) {
       onEvent('regularize', 0);
       await yieldFrame();
-      const regParents = mode === 'bake'
-        ? faceParentId
-        : new Int32Array(subdivided.attributes.position.count / 3);
-      const reg = regularizeMesh(subdivided, regParents, settings.refineLength, regularizeOpts);
+      const reg = regularizeMesh(subdivided, faceParentId, settings.refineLength, regularizeOpts);
       subdivided.dispose();
       const exclAttr = reg.geometry.attributes.excludeWeight;
       const secondPassWeights = exclAttr ? exclAttr.array : null;
@@ -233,13 +233,11 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
         secondPassWeights, { fast: false }
       );
       reg.geometry.dispose();
-      if (mode === 'bake') {
-        const composed = new Int32Array(resubParents.length);
-        for (let i = 0; i < resubParents.length; i++) {
-          composed[i] = reg.faceParentId[resubParents[i]];
-        }
-        faceParentId = composed;
+      const composed = new Int32Array(resubParents.length);
+      for (let i = 0; i < resubParents.length; i++) {
+        composed[i] = reg.faceParentId[resubParents[i]];
       }
+      faceParentId = composed;
       subdivided = resub;
     }
     if (shouldAbort()) return null;
@@ -247,20 +245,54 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
     const subTriCount = subdivided.attributes.position.count / 3;
     onEvent('displace', 0, { triCount: subTriCount });
     await yieldFrame();
-    displaced = applyDisplacement(
-      subdivided,
-      input.imageData,
-      input.imgWidth,
-      input.imgHeight,
-      settings,
-      bounds,
-      (p) => onEvent('displace', p, { triCount: subTriCount })
-    );
-    if (shouldAbort()) return null;
 
-    // Free subdivided geometry — displacement created a separate copy.
-    subdivided.dispose();
-    subdivided = null;
+    if (layers) {
+      // Multi-pattern export: one masked displacement pass per region,
+      // sequentially, on the same evolving geometry. applyDisplacement
+      // preserves triangle order/count (it repositions vertices in place,
+      // never re-triangulates), so faceParentId — computed once above —
+      // stays valid to re-derive each layer's own mask after prior passes.
+      let current = subdivided;
+      subdivided = null;
+      for (let li = 0; li < layers.length; li++) {
+        const layer = layers[li];
+        const layerWeights = new Float32Array(subTriCount * 3);
+        for (let t = 0; t < subTriCount; t++) {
+          const included = layer.triangleSet[faceParentId[t]] === 1;
+          const w = included ? 0 : 1;
+          const o = t * 3;
+          layerWeights[o] = w; layerWeights[o + 1] = w; layerWeights[o + 2] = w;
+        }
+        current.setAttribute('excludeWeight', new THREE.Float32BufferAttribute(layerWeights, 1));
+        const next = applyDisplacement(
+          current,
+          layer.imageData,
+          layer.imgWidth,
+          layer.imgHeight,
+          layer.settings,
+          bounds,
+          (p) => onEvent('displace', (li + p) / layers.length, { triCount: subTriCount })
+        );
+        current.dispose();
+        current = next;
+        if (shouldAbort()) { current.dispose(); return null; }
+      }
+      displaced = current;
+    } else {
+      displaced = applyDisplacement(
+        subdivided,
+        input.imageData,
+        input.imgWidth,
+        input.imgHeight,
+        settings,
+        bounds,
+        (p) => onEvent('displace', p, { triCount: subTriCount })
+      );
+      // Free subdivided geometry — displacement created a separate copy.
+      subdivided.dispose();
+      subdivided = null;
+    }
+    if (shouldAbort()) return null;
 
     const dispTriCount = displaced.attributes.position.count / 3;
     const needsDecimation = dispTriCount > settings.maxTriangles;

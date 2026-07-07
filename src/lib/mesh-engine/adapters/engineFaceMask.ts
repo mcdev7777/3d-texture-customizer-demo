@@ -33,3 +33,10 @@ export function collectCommittedTriangles(
   }
   return set
 }
+
+/** Per-original-triangle membership mask for one pattern region — 1 = belongs to this region. */
+export function buildTriangleSet(triangleCount: number, triangleIndices: readonly number[]): Uint8Array {
+  const set = new Uint8Array(triangleCount)
+  for (const t of triangleIndices) set[t] = 1
+  return set
+}

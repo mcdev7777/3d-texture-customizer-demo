@@ -42,6 +42,31 @@ export interface EngineSettings {
   blendNormalSmoothing: number
 }
 
+/** Per-region displacement pass — everything a single texture/pattern needs to be baked in isolation. */
+export interface EngineLayerSettings {
+  mappingMode: number
+  scaleU: number
+  scaleV: number
+  amplitude: number
+  offsetU: number
+  offsetV: number
+  rotation: number
+  invertDisplacement: boolean
+  symmetricDisplacement: boolean
+  mappingBlend: number
+  seamBandWidth: number
+  blendNormalSmoothing: number
+}
+
+export interface EngineLayer {
+  /** 1 = triangle (indexed by ORIGINAL, pre-subdivision triangle id) belongs to this layer's region. */
+  triangleSet: Uint8Array
+  imageData: ImageData
+  imgWidth: number
+  imgHeight: number
+  settings: EngineLayerSettings
+}
+
 export interface PipelineInput {
   positions: Float32Array
   faceWeights: Float32Array | null
@@ -52,6 +77,15 @@ export interface PipelineInput {
   bounds: EngineBounds
   regularizeOpts: RegularizeOpts
   mode: 'export' | 'bake'
+  /**
+   * When present (mode 'export' only), the displace stage runs once per
+   * layer instead of the single imageData/imgWidth/imgHeight/settings
+   * fields above — each layer's own pattern gets masked to only its own
+   * region (via faceParentId ancestry) and applied on top of the previous
+   * layer's output. `settings` still supplies the pipeline-global knobs
+   * (refineLength, maxTriangles, regularize*, bottom clamp, harvest*).
+   */
+  layers?: EngineLayer[]
 }
 
 export interface RepairStats {

@@ -4,10 +4,11 @@ import type { SurfacePatternPlacement } from '../../types/pattern'
 import { collectAllExportRegionsForMesh } from '../materials/patternMaterialApply'
 import { getExportOutputTriangles } from '../geometry/subdivideSelection'
 import { build3MFPackage } from '../mesh-engine/exporter.js'
-import { buildEngineSettings, buildRegularizeOpts } from '../mesh-engine/adapters/engineSettings'
+import { buildLayerSettings, buildPipelineSettings, buildRegularizeOpts } from '../mesh-engine/adapters/engineSettings'
 import { buildDisplacementTexture } from '../mesh-engine/adapters/engineTexture'
 import {
   buildFaceWeights,
+  buildTriangleSet,
   collectCommittedTriangles,
 } from '../mesh-engine/adapters/engineFaceMask'
 import { computeEngineBounds } from '../mesh-engine/adapters/engineBounds'
@@ -18,22 +19,7 @@ import {
 } from '../mesh-engine/adapters/collectMeshPositions'
 import { mapPipelineProgress, runMeshPipeline } from '../mesh-engine/adapters/runMeshPipeline'
 import type { ExportProgressCallback } from './exportProgress'
-import type { RepairStats } from '../mesh-engine/exportPipeline'
-
-function pickPrimaryRegion(
-  regions: ReturnType<typeof collectAllExportRegionsForMesh>,
-) {
-  if (regions.length === 0) return null
-  let best = regions[0]!
-  let bestFaces = best.triangleIndices.length
-  for (const region of regions) {
-    if (region.triangleIndices.length > bestFaces) {
-      best = region
-      bestFaces = region.triangleIndices.length
-    }
-  }
-  return best
-}
+import type { EngineLayer, RepairStats } from '../mesh-engine/exportPipeline'
 
 function logRepairStats(stats: RepairStats): void {
   console.log(
@@ -93,17 +79,30 @@ export async function export3mfFast(
       continue
     }
 
-    const primary = pickPrimaryRegion(regions)
-    if (!primary?.settings.patternId) {
+    const patternedRegions = regions.filter((r) => r.settings.patternId)
+    if (patternedRegions.length === 0) {
       processedSoups.push(positions)
       continue
     }
 
-    const committedTris = collectCommittedTriangles(regions.map((r) => r.triangleIndices))
+    // One layer per region so each surface's own pattern gets baked instead
+    // of every committed surface being stamped with a single "primary"
+    // (largest) region's pattern — see engineSettings.ts buildLayerSettings.
+    const layers: EngineLayer[] = patternedRegions.map((region) => {
+      const texture = buildDisplacementTexture(region.settings.patternId!, region.settings, quality)
+      return {
+        triangleSet: buildTriangleSet(triangleCount, region.triangleIndices),
+        imageData: texture.imageData,
+        imgWidth: texture.width,
+        imgHeight: texture.height,
+        settings: buildLayerSettings(region, root, exportUnitScale),
+      }
+    })
+
+    const committedTris = collectCommittedTriangles(patternedRegions.map((r) => r.triangleIndices))
     const faceWeights = buildFaceWeights(triangleCount, committedTris)
-    const texture = buildDisplacementTexture(primary.settings.patternId, primary.settings, quality)
     const bounds = computeEngineBounds(positions)
-    const settings = buildEngineSettings(primary, quality, root, exportUnitScale, bounds, positions)
+    const settings = buildPipelineSettings(patternedRegions, quality, bounds, positions)
 
     onProgress?.(
       0.04 + (meshIndex / exportMeshes.length) * 0.02,
@@ -116,13 +115,14 @@ export async function export3mfFast(
       {
         positions,
         faceWeights,
-        imageData: texture.imageData,
-        imgWidth: texture.width,
-        imgHeight: texture.height,
+        imageData: layers[0]!.imageData,
+        imgWidth: layers[0]!.imgWidth,
+        imgHeight: layers[0]!.imgHeight,
         settings,
         bounds,
         regularizeOpts: buildRegularizeOpts(),
         mode: 'export',
+        layers,
       },
       mapPipelineProgress(onProgress, meshIndex, exportMeshes.length),
       isStale,
