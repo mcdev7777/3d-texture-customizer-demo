@@ -382,7 +382,7 @@ function rebuildMesh(mesh: Mesh, modelRoot: Object3D, regions: PatternRegion[]):
   }
 }
 
-function collectAllExportRegionsForMesh(
+export function collectAllExportRegionsForMesh(
   mesh: Mesh,
   modelRoot: Object3D,
   placements: Record<string, SurfacePatternPlacement>,

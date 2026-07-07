@@ -4,6 +4,7 @@ import { DEFAULT_EXPORT_QUALITY } from '../types/bake'
 import type { ExportProgressState } from '../lib/export/exportProgress'
 import { commitPatternMaterial, resetAllPatterns, uncommitSurfacePattern } from '../lib/materials/patternMaterialApply'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
+import { warmupPipelineWorker } from '../lib/mesh-engine/adapters/runMeshPipeline'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
 import { getPatternTargetSurfaces } from '../lib/pattern/selectionTargets'
 import { useAppStore } from './useAppStore'
@@ -29,7 +30,10 @@ interface BakeState {
   resetAll: () => void
 }
 
-export const useBakeStore = create<BakeState>((set, get) => ({
+export const useBakeStore = create<BakeState>((set, get) => {
+  warmupPipelineWorker()
+
+  return {
   status: 'idle',
   committedSurfaceIds: [],
   warnings: [],
@@ -204,4 +208,5 @@ export const useBakeStore = create<BakeState>((set, get) => ({
       exportProgress: null,
     })
   },
-}))
+  }
+})

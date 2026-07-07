@@ -5,7 +5,7 @@ import type { Object3D } from 'three'
 import type { ExportFormat, ExportQuality } from '../../types/bake'
 import type { SurfacePatternPlacement } from '../../types/pattern'
 import { downloadBlob } from './downloadBlob'
-import { export3mf } from './export3mf'
+import { export3mfFast } from './export3mfFast'
 import { preparePrintableExport } from './preparePrintableExport'
 import { clampProgress, type ExportProgressCallback } from './exportProgress'
 import { disposeExportCloneGeometries } from '../three/scheduleDispose'
@@ -80,6 +80,21 @@ export async function exportModifiedModel(params: {
 
   report(0.01, 'Starting export…')
 
+  if (format === '3mf') {
+    const zip = await export3mfFast(object, {
+      placements,
+      committedSurfaceIds,
+      quality,
+      exportUnitScale,
+      onProgress: (fraction, label) => report(fraction, label),
+    })
+    const blob = new Blob([zip as BlobPart], {
+      type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml',
+    })
+    downloadBlob(blob, defaultFileName(baseName, '3mf'), blob.type)
+    return
+  }
+
   const exportRoot = await preparePrintableExport(object, {
     placements,
     committedSurfaceIds,
@@ -111,16 +126,6 @@ export async function exportModifiedModel(params: {
         const text = exportObj(exportRoot)
         report(1, 'Download ready')
         downloadBlob(text, defaultFileName(baseName, 'obj'), 'text/plain')
-        break
-      }
-      case '3mf': {
-        const zip = await export3mf(exportRoot, (fraction, label) => {
-          report(0.9 + fraction * 0.1, label)
-        })
-        const blob = new Blob([zip as BlobPart], {
-          type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml',
-        })
-        downloadBlob(blob, defaultFileName(baseName, '3mf'), blob.type)
         break
       }
       default: {
