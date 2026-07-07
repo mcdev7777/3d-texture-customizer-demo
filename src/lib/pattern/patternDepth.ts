@@ -1,8 +1,21 @@
 import { Box3, Vector3, type Object3D } from 'three'
 import { DEPTH_MAX, DEPTH_MIN } from '../../types/pattern'
 
-/** Max displacement as fraction of model bounding size. */
-export const MAX_DISPLACEMENT_FRACTION = 0.12
+/**
+ * Max displacement as fraction of model bounding size.
+ *
+ * At the old 0.12, the default depth setting (1, curve≈0.5) alone produced
+ * displacement equal to 6% of the model's largest dimension — e.g. 6mm of
+ * relief on a 100mm part, from the *default* slider position before the user
+ * even touches it. Live preview doesn't reveal this because it's a shader
+ * normal-perturbation bump (silhouette never actually moves), so users only
+ * discover the true depth once real geometry is baked (Apply, or any
+ * export) — where it reads as the pattern "destroying" the model. 0.025
+ * brings default depth (1) to ~1.25% of max dimension and depth 0.5 to
+ * ~0.66%, both applied consistently to preview, commit, and export since
+ * they all share `depthLevelToDisplacementWorld`.
+ */
+export const MAX_DISPLACEMENT_FRACTION = 0.025
 
 function smoothstep01(t: number): number {
   const x = Math.min(1, Math.max(0, t))
