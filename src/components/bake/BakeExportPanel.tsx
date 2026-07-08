@@ -115,14 +115,14 @@ export function BakeExportPanel() {
             label="3D Preview"
             checked={show3DPreview}
             onChange={setShow3DPreview}
-            disabled={!hasApplied}
+            disabled={!hasApplied && !selectedHasPattern}
           />
           <p className="text-[10px] text-slate-500 -mt-1">
             {show3DPreviewBusy
               ? 'Baking real geometry…'
               : show3DPreview
-                ? 'Applied patterns show as real extruded/embossed geometry — those surfaces can’t be selected while this is on.'
-                : 'Shows applied patterns as real 3D relief (adds/removes material) instead of shading only.'}
+                ? 'Applied and selected patterns show as real extruded/embossed geometry — those surfaces can’t be selected while this is on.'
+                : 'Shows applied and selected patterns as real 3D relief (adds/removes material) instead of shading only.'}
           </p>
         </div>
 

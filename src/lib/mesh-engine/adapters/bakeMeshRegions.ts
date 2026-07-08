@@ -66,8 +66,15 @@ export async function bakeMeshRegions(
   soupScale: number,
   onEvent?: PipelineEventHandler,
   isStale?: () => boolean,
+  previewSurfaceIds: readonly string[] = [],
 ): Promise<BakeMeshRegionsResult | null> {
-  const regions = collectAllExportRegionsForMesh(mesh, root, placements, committedSurfaceIds)
+  const regions = collectAllExportRegionsForMesh(
+    mesh,
+    root,
+    placements,
+    committedSurfaceIds,
+    previewSurfaceIds,
+  )
   const patternedRegions = regions.filter((r) => r.settings.patternId)
   const { positions, triangleCount } = collectMeshTriangleSoup(mesh, soupScale)
 
