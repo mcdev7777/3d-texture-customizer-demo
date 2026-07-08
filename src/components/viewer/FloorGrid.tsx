@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { Grid, Plane } from '@react-three/drei'
+import { DoubleSide } from 'three'
 import { useAppStore } from '../../store/useAppStore'
 
 export function FloorGrid() {
@@ -14,7 +15,7 @@ export function FloorGrid() {
   return (
     <group position={[0, 0, -0.01]}>
       <Plane args={[20, 20]} receiveShadow>
-        <meshStandardMaterial color={matColor} roughness={0.95} metalness={0.05} />
+        <meshStandardMaterial color={matColor} roughness={0.95} metalness={0.05} side={DoubleSide} />
       </Plane>
       <Grid
         args={[20, 20]}
@@ -28,6 +29,7 @@ export function FloorGrid() {
         fadeStrength={1.2}
         followCamera={false}
         infiniteGrid={false}
+        side={DoubleSide}
         rotation={[Math.PI / 2, 0, 0]}
         position={[0, 0, 0.001]}
       />
