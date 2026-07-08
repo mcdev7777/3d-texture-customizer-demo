@@ -554,7 +554,18 @@ export function computeReliefEdgeTargets(
       patternDetail.projection.height,
       1e-6,
     )
-    const cellSize = extent / (cells * s)
+    // "Scale" is a tile-*size* multiplier (see patternShaderMaterial.ts /
+    // engineSettings.ts): scale 1 = one tile fills the selection, scale 0.5
+    // = each tile is half-size (more, smaller tiles), scale 2 = each tile is
+    // twice the selection size. Cell size must scale the same way — smaller
+    // scale means a physically smaller cell needing *finer* subdivision to
+    // resolve, not coarser. This used to be `extent / (cells * s)` (inverse),
+    // which matched the pattern's old "repeat density" scale convention; once
+    // that convention flipped, this stayed a divisor and started under-
+    // resolving low-scale (small, dense) patterns — visible as broken/
+    // aliased-looking 3D relief at scale ≤ ~0.25, where the true cell size is
+    // a quarter of what this formula assumed.
+    const cellSize = (extent * s) / cells
     const featureRadius =
       PATTERN_FEATURE_RADIUS[patternDetail.patternId] ?? 0.5 / cells
     const featureDiameter = cellSize * featureRadius * 2

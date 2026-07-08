@@ -19,8 +19,8 @@ import type { SelectionMode } from '../../types/surfaceSelection'
 import type { SurfacePatternSettings } from '../../types/pattern'
 import { DEPTH_MAX } from '../../types/pattern'
 import { createSurfaceProjectionFromHighlight, type SurfaceProjection } from '../geometry/surfaceProjection'
-import { getSelectionTileWorld } from '../textures/patternPlacementMath'
-import { depthLevelToDisplacementWorld, getModelMaxDimension } from '../pattern/patternDepth'
+import { getExportUnitScale, getSelectionTileWorld } from '../textures/patternPlacementMath'
+import { depthLevelToDisplacementWorld } from '../pattern/patternDepth'
 import { getPatternTexture, getPatternTextureAspect } from './patternTexture'
 import { computePatternBounds, type PatternBounds } from './patternBounds'
 
@@ -45,6 +45,11 @@ uniform vec3 patternBitangentWorld;
 uniform float patternTileWorld;
 uniform float patternSelectionWidth;
 uniform float patternSelectionHeight;
+// Pattern "Scale": a *size* multiplier, matching how scale works everywhere
+// else in the app (image/texture editors, CAD) — scale 2 = each tile twice
+// as big (fewer repeats across the selection); scale 0.5 = each tile half
+// as big (more repeats — e.g. a 2x2 grid of tiles across the selection).
+// UV is divided by it, not multiplied.
 uniform float patternRepeatScale;
 uniform float patternRotationRad;
 uniform vec2 patternOffsetUV;
@@ -59,6 +64,16 @@ uniform vec3 patternBoundsSize;
 varying vec3 vPatternWorldPos;
 
 const float PATTERN_CUBIC_AXIS_EPSILON = 1e-4;
+// Mirrors mapping.js's getCubicBlendWeights(normal, blend=1, seamBandWidth=0.5)
+// — the CPU mesh-engine bake path (export + 3D Preview) has always smoothly
+// cross-faded cubic mapping across the cube-face seam band instead of hard-
+// switching axis per triangle, but this live shader preview picked a single
+// dominant axis per fragment with no blending at all. On a curved/multi-facet
+// selection (especially a "Merged" multi-surface group) that hard switch is
+// exactly where the pattern's scale/direction visibly jumped. Porting the
+// same smooth weights here makes the live preview match the baked result.
+const float PATTERN_SEAM_BLEND = 1.0;
+const float PATTERN_SEAM_BAND_WIDTH = 0.5;
 
 int patternDominantCubicAxis(vec3 n) {
   vec3 absN = abs(n);
@@ -68,10 +83,24 @@ int patternDominantCubicAxis(vec3 n) {
 }
 
 vec3 patternCubicBlendWeights(vec3 n) {
+  vec3 absN = abs(n);
   int axis = patternDominantCubicAxis(n);
-  if (axis == 0) return vec3(1.0, 0.0, 0.0);
-  if (axis == 1) return vec3(0.0, 1.0, 0.0);
-  return vec3(0.0, 0.0, 1.0);
+  vec3 oneHot = vec3(axis == 0 ? 1.0 : 0.0, axis == 1 ? 1.0 : 0.0, axis == 2 ? 1.0 : 0.0);
+
+  float primary = axis == 0 ? absN.x : (axis == 1 ? absN.y : absN.z);
+  float secondary = axis == 0 ? max(absN.y, absN.z) : (axis == 1 ? max(absN.x, absN.z) : max(absN.x, absN.y));
+
+  float seamWidth = max(PATTERN_SEAM_BAND_WIDTH, PATTERN_CUBIC_AXIS_EPSILON * 2.0);
+  float seamMixRaw = 1.0 - clamp((primary - secondary) / seamWidth, 0.0, 1.0);
+  float seamMix = PATTERN_SEAM_BLEND * seamMixRaw * seamMixRaw * (3.0 - 2.0 * seamMixRaw);
+  if (seamMix <= 0.001) return oneHot;
+
+  float power = 1.0 + (1.0 - seamMix) * 11.0;
+  vec3 smoothW = vec3(pow(absN.x, power), pow(absN.y, power), pow(absN.z, power));
+  smoothW /= (smoothW.x + smoothW.y + smoothW.z + 1e-6);
+
+  vec3 mixed = oneHot * (1.0 - seamMix) + smoothW * seamMix;
+  return mixed / (mixed.x + mixed.y + mixed.z);
 }
 
 float patternSampleMap(vec2 normUV) {
@@ -89,8 +118,8 @@ float patternHeightPlanar(vec3 pos) {
   vec3 rel = pos - patternOriginWorld;
   float uWorld = dot(rel, patternTangentWorld);
   float vWorld = dot(rel, patternBitangentWorld);
-  float pu = (uWorld / max(patternSelectionWidth, 1e-4) + 0.5) * patternRepeatScale;
-  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) * patternRepeatScale;
+  float pu = (uWorld / max(patternSelectionWidth, 1e-4) + 0.5) / patternRepeatScale;
+  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) / patternRepeatScale;
   return patternSampleMap(vec2(pu, pv));
 }
 
@@ -104,9 +133,9 @@ float patternHeightCubic(vec3 pos, vec3 projN) {
   float xyU = (pos.x - patternBoundsMin.x) / md;
   if (projN.z < 0.0) xyU = -xyU;
 
-  float hXY = patternSampleMap(vec2(xyU * patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) * patternRepeatScale));
-  float hXZ = patternSampleMap(vec2(xzU * patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) * patternRepeatScale));
-  float hYZ = patternSampleMap(vec2(yzU * patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) * patternRepeatScale));
+  float hXY = patternSampleMap(vec2(xyU / patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) / patternRepeatScale));
+  float hXZ = patternSampleMap(vec2(xzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScale));
+  float hYZ = patternSampleMap(vec2(yzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScale));
 
   vec3 wts = patternCubicBlendWeights(projN);
   return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
@@ -199,8 +228,7 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
 
   const aspect = getPatternTextureAspect(patternId)
   const tileWorld = getSelectionTileWorld(projection, aspect.u, aspect.v, settings.scale)
-  const modelMaxDim = getModelMaxDimension(modelRoot)
-  const amplitude = depthLevelToDisplacementWorld(settings.depth, modelMaxDim)
+  const amplitude = depthLevelToDisplacementWorld(settings.depth, getExportUnitScale(modelRoot))
   const b = bounds ?? {
     min: new Vector3(),
     max: new Vector3(1, 1, 1),
@@ -336,6 +364,15 @@ export function updatePatternShaderMaterial(material: Material, options: Pattern
   material.needsUpdate = true
 }
 
+function boundsFromWorldMinMax(min: Vector3, max: Vector3): PatternBounds {
+  return {
+    min: min.clone(),
+    max: max.clone(),
+    center: min.clone().add(max).multiplyScalar(0.5),
+    size: max.clone().sub(min),
+  }
+}
+
 export function buildPatternMaterialOptions(
   mesh: Mesh,
   modelRoot: Object3D,
@@ -348,6 +385,7 @@ export function buildPatternMaterialOptions(
     selectionType: SelectionMode
     mappingMode?: SelectionMode
     cubicBoundsTriangles?: readonly number[]
+    sharedBoundsWorld?: { min: Vector3; max: Vector3 }
   },
   baseMaterial: Material,
 ): PatternMaterialOptions {
@@ -366,7 +404,9 @@ export function buildPatternMaterialOptions(
       : region.triangleIndices
   const bounds =
     mappingMode === 'part'
-      ? computePatternBounds(mesh, stateGeometry, boundsTriangles)
+      ? region.sharedBoundsWorld
+        ? boundsFromWorldMinMax(region.sharedBoundsWorld.min, region.sharedBoundsWorld.max)
+        : computePatternBounds(mesh, stateGeometry, boundsTriangles)
       : undefined
 
   return {

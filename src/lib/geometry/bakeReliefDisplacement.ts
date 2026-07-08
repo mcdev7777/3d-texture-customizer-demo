@@ -9,7 +9,7 @@ import {
 import type { PatternRegion } from '../materials/patternMaterialApply'
 import { computePatternBounds } from '../materials/patternBounds'
 import { buildProjectionForMesh } from '../materials/patternShaderMaterial'
-import { depthLevelToDisplacementWorld, getModelMaxDimension } from '../pattern/patternDepth'
+import { depthLevelToDisplacementWorld } from '../pattern/patternDepth'
 import {
   createProjectionContext,
   samplePatternHeightAtWorld,
@@ -204,8 +204,8 @@ export async function bakeReliefIntoGeometry(
     )
   }
 
-  const modelMaxDim = getModelMaxDimension(modelRoot)
-  const depthWorld = depthLevelToDisplacementWorld(region.settings.depth, modelMaxDim)
+  const exportUnitScale = params.exportUnitScale ?? getExportUnitScale(modelRoot)
+  const depthWorld = depthLevelToDisplacementWorld(region.settings.depth, exportUnitScale)
   if (depthWorld <= 0) return params
 
   const pristineSelection = new Set(region.triangleIndices)
@@ -228,7 +228,6 @@ export async function bakeReliefIntoGeometry(
       : region.triangleIndices
   const bounds = computePatternBounds(mesh, pristineGeometry, boundsTriangles)
 
-  const exportUnitScale = params.exportUnitScale ?? getExportUnitScale(modelRoot)
   const exportQuality = quality === 'preview' ? 'high' : quality
   const mappingCtx = createProjectionContext(
     region.settings.patternId,

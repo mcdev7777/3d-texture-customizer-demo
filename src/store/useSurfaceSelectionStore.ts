@@ -16,7 +16,9 @@ import { getTriangleCount } from '../lib/surface/geometryKeys'
 import { getSurfaceId } from '../lib/surface/getSurfaceId'
 import { clampFaceIndex, isMeshInModel } from '../lib/surface/meshUtils'
 import { getMeshPatternPristineGeometry } from '../lib/materials/meshPatternRegistry'
+import { isTriangleInCommittedRegion } from '../lib/materials/patternMaterialApply'
 import { mapLiveFaceIndexToPristine } from '../lib/surface/mapFaceToPristine'
+import { useBakeStore } from './useBakeStore'
 
 interface LastPick {
   mesh: Mesh
@@ -90,6 +92,14 @@ function buildSelection(
     clampedFace = mapLiveFaceIndexToPristine(mesh, pristineGeometry, clampedFace)
   } else {
     clampedFace = clampFaceIndex(clampedFace, triangleCount)
+  }
+
+  // 3D Preview mode shows applied patterns as real extruded/embossed
+  // geometry via a separate overlay and hides the flat original surface
+  // underneath — clicking that area should behave like clicking nothing
+  // selectable, not silently re-select the hidden flat surface beneath it.
+  if (useBakeStore.getState().show3DPreview && isTriangleInCommittedRegion(mesh, clampedFace)) {
+    return null
   }
 
   let triangleIndices: number[]

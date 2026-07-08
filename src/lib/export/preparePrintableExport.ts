@@ -11,27 +11,10 @@ import {
 import type { SurfacePatternPlacement } from '../../types/pattern'
 import type { ExportQuality } from '../../types/bake'
 import { extractBaseColor } from '../materials/extractBaseColor'
-import { collectAllExportRegionsForMesh } from '../materials/patternMaterialApply'
 import { getExportOutputTriangles } from '../geometry/subdivideSelection'
-import {
-  buildLayerSettings,
-  buildPipelineSettings,
-  buildRegularizeOpts,
-} from '../mesh-engine/adapters/engineSettings'
-import { buildDisplacementTexture } from '../mesh-engine/adapters/engineTexture'
-import {
-  buildFaceWeights,
-  buildTriangleSet,
-  collectCommittedTriangles,
-} from '../mesh-engine/adapters/engineFaceMask'
-import { computeEngineBounds } from '../mesh-engine/adapters/engineBounds'
-import {
-  collectExportMeshes,
-  collectMeshTriangleSoup,
-  isExportExcluded,
-} from '../mesh-engine/adapters/collectMeshPositions'
-import { mapPipelineProgress, runMeshPipeline } from '../mesh-engine/adapters/runMeshPipeline'
-import type { EngineLayer } from '../mesh-engine/exportPipeline'
+import { bakeMeshRegions } from '../mesh-engine/adapters/bakeMeshRegions'
+import { collectExportMeshes, isExportExcluded } from '../mesh-engine/adapters/collectMeshPositions'
+import { mapPipelineProgress } from '../mesh-engine/adapters/runMeshPipeline'
 import { logExportGeometryStats } from './exportDiagnostics'
 import { type ExportProgressCallback, yieldToMain } from './exportProgress'
 
@@ -121,73 +104,36 @@ export async function preparePrintableExport(
     const bakeStart = 0.05 + meshFraction * 0.82
     const bakeEnd = 0.05 + nextMeshFraction * 0.82
 
-    const regions = collectAllExportRegionsForMesh(mesh, root, placements, committedSurfaceIds)
-    const patternedRegions = regions.filter((r) => r.settings.patternId)
-    const { positions, triangleCount } = collectMeshTriangleSoup(mesh, exportUnitScale)
-
     onProgress?.(
       bakeStart,
-      exportMeshes.length > 1
-        ? `Processing mesh ${meshIndex + 1}/${exportMeshes.length}…`
-        : patternedRegions.length > 0
-          ? 'Baking relief geometry…'
-          : 'Copying mesh…',
+      exportMeshes.length > 1 ? `Processing mesh ${meshIndex + 1}/${exportMeshes.length}…` : 'Baking relief geometry…',
     )
     await yieldToMain()
 
-    let finalPositions = positions
-    let finalNormals: Float32Array | null = null
+    const result = await bakeMeshRegions(
+      mesh,
+      root,
+      placements,
+      committedSurfaceIds,
+      quality,
+      exportUnitScale,
+      exportUnitScale,
+      mapPipelineProgress(
+        (fraction, label) => onProgress?.(bakeStart + (bakeEnd - bakeStart) * fraction, label),
+        0,
+        1,
+      ),
+      isStale,
+    )
 
-    if (patternedRegions.length > 0) {
-      const layers: EngineLayer[] = patternedRegions.map((region) => {
-        const texture = buildDisplacementTexture(region.settings.patternId!, region.settings, quality)
-        return {
-          triangleSet: buildTriangleSet(triangleCount, region.triangleIndices),
-          imageData: texture.imageData,
-          imgWidth: texture.width,
-          imgHeight: texture.height,
-          settings: buildLayerSettings(region, root, exportUnitScale),
-        }
-      })
-
-      const committedTris = collectCommittedTriangles(patternedRegions.map((r) => r.triangleIndices))
-      const faceWeights = buildFaceWeights(triangleCount, committedTris)
-      const bounds = computeEngineBounds(positions)
-      const settings = buildPipelineSettings(patternedRegions, quality, bounds, positions)
-
-      const result = await runMeshPipeline(
-        {
-          positions,
-          faceWeights,
-          imageData: layers[0]!.imageData,
-          imgWidth: layers[0]!.imgWidth,
-          imgHeight: layers[0]!.imgHeight,
-          settings,
-          bounds,
-          regularizeOpts: buildRegularizeOpts(),
-          mode: 'export',
-          layers,
-        },
-        mapPipelineProgress(
-          (fraction, label) => onProgress?.(bakeStart + (bakeEnd - bakeStart) * fraction, label),
-          0,
-          1,
-        ),
-        isStale,
-      )
-
-      if (!result || isStale()) {
-        throw new Error('Export was cancelled.')
-      }
-
-      finalPositions = result.positions
-      finalNormals = result.normals
+    if (!result || isStale()) {
+      throw new Error('Export was cancelled.')
     }
 
     const geometry = new BufferGeometry()
-    geometry.setAttribute('position', new BufferAttribute(finalPositions, 3))
-    if (finalNormals) {
-      geometry.setAttribute('normal', new BufferAttribute(finalNormals, 3))
+    geometry.setAttribute('position', new BufferAttribute(result.positions, 3))
+    if (result.normals) {
+      geometry.setAttribute('normal', new BufferAttribute(result.normals, 3))
     } else {
       geometry.computeVertexNormals()
     }

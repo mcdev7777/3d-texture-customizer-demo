@@ -5,6 +5,7 @@ import { Button } from '../ui/Button'
 import { ToggleRow } from '../ui/ToggleRow'
 import { useAppStore } from '../../store/useAppStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
+import { usePatternStore, type PatternCoherenceMode } from '../../store/usePatternStore'
 import {
   MAX_ANGLE_TOLERANCE,
   MIN_ANGLE_TOLERANCE,
@@ -36,6 +37,8 @@ export function SurfaceSelectionPanel() {
   const clearSelection = useSurfaceSelectionStore((s) => s.clearSelection)
   const hasSeed = useSurfaceSelectionStore((s) => s.lastPick !== null)
   const selectionCount = selectedSurfaces.length
+  const patternCoherence = usePatternStore((s) => s.patternCoherence)
+  const setPatternCoherence = usePatternStore((s) => s.setPatternCoherence)
 
   const modes: { id: SelectionMode; label: string }[] = [
     { id: 'surface', label: 'Surface' },
@@ -151,9 +154,43 @@ export function SurfaceSelectionPanel() {
             <StatRow label="Normal" value={formatNormal(selectedSurface.normal)} />
             <StatRow label="Area" value={formatArea(selectedSurface.area)} />
             {selectionCount > 1 && (
-              <p className="text-[10px] text-slate-500 pt-1">
-                Texture library, placement, preview, and apply affect all selected regions.
-              </p>
+              <>
+                <p className="text-[10px] text-slate-500 pt-1">
+                  Texture library, placement, preview, and apply affect all selected regions.
+                </p>
+                <div className="pt-2">
+                  <span className="block text-xs font-medium text-purple-300 mb-2">
+                    Pattern across selection
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        { id: 'individual', label: 'Individual' },
+                        { id: 'merged', label: 'Merged' },
+                      ] satisfies { id: PatternCoherenceMode; label: string }[]
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setPatternCoherence(m.id)}
+                        className={clsx(
+                          'rounded-lg px-2 py-2 text-xs font-medium border transition-all',
+                          patternCoherence === m.id
+                            ? 'border-purple-400 bg-purple-600/25 text-white'
+                            : 'border-purple-500/20 text-slate-400 hover:bg-white/5',
+                        )}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500 pt-2">
+                    {patternCoherence === 'merged'
+                      ? 'One continuous pattern mapped across all selected surfaces — no seam at each face boundary.'
+                      : 'Each selected surface gets its own independent pattern placement.'}
+                  </p>
+                </div>
+              </>
             )}
           </div>
         ) : (

@@ -1,7 +1,9 @@
 import {
+  Box3,
   BufferGeometry,
   Material,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Vector3,
   type Object3D,
@@ -55,6 +57,17 @@ export interface PatternRegion {
   mappingMode?: SelectionMode
   /** Full part triangle set for cubic bounds when islands bake with part mapping. */
   cubicBoundsTriangles?: readonly number[]
+  /**
+   * World-space cubic-mapping bounds override, shared by every region in a
+   * "Merged" pattern group that spans more than one mesh. A PatternRegion's
+   * triangleIndices can only reference one mesh's own geometry, so a
+   * cross-mesh merge still becomes N separate regions (one per mesh) — but
+   * giving every one of them this same bounds reference (instead of each
+   * computing its own, mesh-local bounds) keeps the cubic-mapped pattern at
+   * one consistent scale/alignment across all the merged meshes, so it reads
+   * as one continuous treatment instead of a separate pattern per part.
+   */
+  sharedBoundsWorld?: { min: Vector3; max: Vector3 }
 }
 
 interface MeshPatternState {
@@ -148,12 +161,27 @@ function getOriginalMaterial(state: MeshPatternState): Material {
   return mat ?? new MeshStandardMaterial()
 }
 
+// Mesh UUIDs whose *committed* (not in-progress preview) regions should
+// render invisible on the original mesh — used by 3D Preview mode, which
+// shows a separate real-geometry overlay in their place instead. Colour and
+// depth writes are both off so the invisible surface can't occlude the
+// overlay or leave a depth-buffer shadow; the geometry itself is untouched
+// so raycasting/selection against the rest of the mesh is unaffected.
+const hiddenCommittedMeshes = new Set<string>()
+
+function createInvisibleMaterial(): Material {
+  return new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+}
+
 function createRegionMaterial(
   mesh: Mesh,
   modelRoot: Object3D,
   state: MeshPatternState,
   region: PatternRegion,
 ): Material {
+  if (hiddenCommittedMeshes.has(mesh.uuid) && !isPreviewRegion(region.surfaceId)) {
+    return createInvisibleMaterial()
+  }
   const baseMaterial = resolveMeshRegionMaterial(
     state.pristineGeometry,
     state.pristineMaterial,
@@ -414,6 +442,9 @@ export function collectAllExportRegionsForMesh(
         selectionType: region.selectionType,
         mappingMode: region.mappingMode ?? region.selectionType,
         cubicBoundsTriangles: region.cubicBoundsTriangles,
+        sharedBoundsWorld: region.sharedBoundsWorld
+          ? { min: region.sharedBoundsWorld.min.clone(), max: region.sharedBoundsWorld.max.clone() }
+          : undefined,
       })
       seen.add(region.surfaceId)
     }
@@ -619,11 +650,24 @@ export interface MeshPreviewTarget {
   settings: SurfacePatternSettings
 }
 
+/**
+ * When set, `syncMeshPreviewPatterns` collapses every preview target on this
+ * mesh into ONE merged preview region (mirroring `commitMergedPatternMaterial`)
+ * instead of one independent region per surface — so "Merged" coherence mode
+ * shows the cohesive combined pattern live, before the user ever clicks
+ * "Apply Texture", not just after.
+ */
+export interface MeshPreviewMergeOptions {
+  primarySurfaceId: string
+  sharedBoundsWorld?: { min: Vector3; max: Vector3 }
+}
+
 /** Set all preview regions on one mesh at once (multi-select safe). */
 export function syncMeshPreviewPatterns(
   mesh: Mesh,
   modelRoot: Object3D,
   previews: MeshPreviewTarget[],
+  mergeOptions?: MeshPreviewMergeOptions,
 ): void {
   if (previews.length === 0) {
     removePreviewPattern(mesh, modelRoot)
@@ -632,6 +676,34 @@ export function syncMeshPreviewPatterns(
 
   const state = ensureMeshState(mesh)
   const committed = state.regions.filter((r) => !isPreviewRegion(r.surfaceId))
+
+  if (mergeOptions) {
+    const triangleSet = new Set<number>()
+    for (const { surface } of previews) {
+      for (const t of resolveTriangleIndices(mesh, state, surface)) triangleSet.add(t)
+    }
+
+    const primary =
+      previews.find((p) => p.surface.surfaceId === mergeOptions.primarySurfaceId) ?? previews[0]!
+
+    const region: PatternRegion = {
+      surfaceId: previewRegionId(mergeOptions.primarySurfaceId),
+      triangleIndices: [...triangleSet],
+      settings: { ...primary.settings },
+      normal: primary.surface.normal.clone(),
+      anchor: primary.surface.point.clone(),
+      selectionType: primary.surface.selectionType,
+      mappingMode: 'part',
+      sharedBoundsWorld: mergeOptions.sharedBoundsWorld
+        ? { min: mergeOptions.sharedBoundsWorld.min.clone(), max: mergeOptions.sharedBoundsWorld.max.clone() }
+        : undefined,
+    }
+
+    state.regions = [...committed, region]
+    rebuildMesh(mesh, modelRoot, state.regions)
+    return
+  }
+
   const seen = new Set<string>()
   const previewRegions: PatternRegion[] = []
 
@@ -667,6 +739,137 @@ export function commitPatternMaterial(
   rebuildMesh(mesh, modelRoot, state.regions)
 }
 
+/**
+ * World-space AABB across a set of selected surfaces that may span *multiple
+ * mesh objects* — e.g. a real assembly's "outside" is very often several
+ * separate mesh bodies (Mini_Toolbox.3mf alone has 26), not one. A single
+ * PatternRegion can only carry triangleIndices for one mesh's own geometry,
+ * so a cross-mesh merge is unavoidably N regions (one per mesh) — but every
+ * one of them can still reference this *same* combined bounds, so the cubic
+ * mapping they all use scales and aligns identically instead of each mesh
+ * getting its own, different reference frame (which is what made a
+ * multi-mesh "merge" still look like independent per-part patterns).
+ */
+export function computeSharedWorldBounds(
+  modelRoot: Object3D,
+  surfaces: readonly SelectedSurface[],
+): { min: Vector3; max: Vector3 } {
+  const box = new Box3()
+  const v = new Vector3()
+
+  for (const surface of surfaces) {
+    const mesh = findMeshByUuid(modelRoot, surface.meshUuid)
+    if (!mesh) continue
+    mesh.updateWorldMatrix(true, false)
+
+    const state = ensureMeshState(mesh)
+    const geo = state.pristineGeometry
+    const pos = geo.getAttribute('position')
+    const index = geo.index
+    const triangleIndices = resolveTriangleIndices(mesh, state, surface)
+
+    for (const t of triangleIndices) {
+      for (let k = 0; k < 3; k++) {
+        const vi = index ? index.getX(t * 3 + k) : t * 3 + k
+        v.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi)).applyMatrix4(mesh.matrixWorld)
+        box.expandByPoint(v)
+      }
+    }
+  }
+
+  if (box.isEmpty()) return { min: new Vector3(), max: new Vector3(1, 1, 1) }
+  return { min: box.min.clone(), max: box.max.clone() }
+}
+
+/**
+ * Commit one pattern across *multiple* selected surfaces on the same mesh as
+ * a single cohesive region, instead of each surface getting its own
+ * independent placement (which restarts/seams the pattern at every surface
+ * boundary). The combined region's triangles are the union of every
+ * surface's triangles, mapped with cubic/box mapping (`mappingMode: 'part'`)
+ * — the same mechanism "Part" selections already use to map many
+ * differently-oriented faces from one shared, continuous frame.
+ *
+ * Stored under `primarySurfaceId` (normally the active/last-clicked surface)
+ * — the other selected surfaces' own surfaceIds are folded into this one
+ * region rather than getting separate entries, so `committedSurfaceIds`
+ * should track only `primarySurfaceId` for this group.
+ *
+ * `sharedBoundsWorld`, when given, overrides the region's own (mesh-local)
+ * bounds — pass this when the overall merge spans multiple meshes so every
+ * mesh's region shares one consistent cubic-mapping reference frame; see
+ * `computeSharedWorldBounds`.
+ */
+export function commitMergedPatternMaterial(
+  mesh: Mesh,
+  modelRoot: Object3D,
+  selectedSurfaces: SelectedSurface[],
+  settings: SurfacePatternSettings,
+  primarySurfaceId: string,
+  sharedBoundsWorld?: { min: Vector3; max: Vector3 },
+): void {
+  if (selectedSurfaces.length === 0) return
+
+  const state = ensureMeshState(mesh)
+  const triangleSet = new Set<number>()
+  for (const surface of selectedSurfaces) {
+    for (const t of resolveTriangleIndices(mesh, state, surface)) triangleSet.add(t)
+  }
+
+  const primary =
+    selectedSurfaces.find((s) => s.surfaceId === primarySurfaceId) ?? selectedSurfaces[0]!
+
+  const region: PatternRegion = {
+    surfaceId: primarySurfaceId,
+    triangleIndices: [...triangleSet],
+    settings: { ...settings },
+    normal: primary.normal.clone(),
+    anchor: primary.point.clone(),
+    selectionType: primary.selectionType,
+    mappingMode: 'part',
+    sharedBoundsWorld: sharedBoundsWorld
+      ? { min: sharedBoundsWorld.min.clone(), max: sharedBoundsWorld.max.clone() }
+      : undefined,
+  }
+
+  const mergedIds = new Set(selectedSurfaces.map((s) => s.surfaceId))
+  state.regions = state.regions.filter((r) => !mergedIds.has(r.surfaceId))
+  state.regions.push(region)
+  rebuildMesh(mesh, modelRoot, state.regions)
+}
+
+/**
+ * Toggle whether `mesh`'s committed (applied) regions render invisible on
+ * the original mesh — used by 3D Preview mode, which shows a real
+ * geometry-displaced overlay in their place. In-progress (not-yet-applied)
+ * preview regions on the same mesh are unaffected, so a surface being
+ * actively edited keeps showing its normal 2D bump preview.
+ */
+export function setCommittedRegionsHiddenForMesh(
+  modelRoot: Object3D,
+  meshUuid: string,
+  hidden: boolean,
+): void {
+  if (hidden) hiddenCommittedMeshes.add(meshUuid)
+  else hiddenCommittedMeshes.delete(meshUuid)
+
+  const mesh = findMeshByUuid(modelRoot, meshUuid)
+  const state = meshStates.get(meshUuid)
+  if (!mesh || !state) return
+  rebuildMesh(mesh, modelRoot, state.regions)
+}
+
+/** True when `faceIndex` (pristine indexing) belongs to an already-committed (applied) region on `mesh`. */
+export function isTriangleInCommittedRegion(mesh: Mesh, faceIndex: number): boolean {
+  const state = meshStates.get(mesh.uuid)
+  if (!state) return false
+  for (const region of state.regions) {
+    if (isPreviewRegion(region.surfaceId)) continue
+    if (region.triangleIndices.includes(faceIndex)) return true
+  }
+  return false
+}
+
 export function resetMeshPatterns(mesh: Mesh): void {
   const state = meshStates.get(mesh.uuid)
   if (!state) return
@@ -679,6 +882,7 @@ export function resetMeshPatterns(mesh: Mesh): void {
   disposeMeshPatternState(state)
   unregisterMeshPristineGeometry(mesh.uuid)
   meshStates.delete(mesh.uuid)
+  hiddenCommittedMeshes.delete(mesh.uuid)
 }
 
 export function resetAllPatterns(modelRoot: Object3D | null): void {

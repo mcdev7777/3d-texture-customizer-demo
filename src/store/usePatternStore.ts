@@ -10,8 +10,19 @@ import { getSurfaceId, getSurfaceLabel } from '../lib/surface/getSurfaceId'
 import { disposePatternTextures, getPatternDefinition } from '../utils/patternTextures'
 import { disposePatternTextureCache } from '../lib/materials/patternTexture'
 
+/**
+ * How a pattern applies across multiple selected surfaces:
+ * - 'individual': each surface gets its own independent placement/mapping
+ *   (a seam or restart at every surface boundary).
+ * - 'merged': all currently-selected surfaces (per mesh) are combined into
+ *   one cohesive region and mapped as a single continuous pattern (like
+ *   "Part" mode's box mapping) instead of restarting at each face.
+ */
+export type PatternCoherenceMode = 'individual' | 'merged'
+
 interface PatternState {
   placements: Record<string, SurfacePatternPlacement>
+  patternCoherence: PatternCoherenceMode
 
   getSettings: (surfaceId: string) => SurfacePatternSettings
   getPlacement: (surfaceId: string) => SurfacePatternPlacement | null
@@ -20,6 +31,7 @@ interface PatternState {
   updateSettings: (surfaceId: string, patch: Partial<SurfacePatternSettings>) => void
   updateSettingsMany: (surfaceIds: string[], patch: Partial<SurfacePatternSettings>) => void
   syncActivePlacementToTargets: (surfaces: SelectedSurface[], activeSurfaceId: string) => void
+  setPatternCoherence: (mode: PatternCoherenceMode) => void
   resetSurface: (surfaceId: string) => void
   clearAll: () => void
 }
@@ -48,6 +60,9 @@ function settingsEqual(a: SurfacePatternSettings, b: SurfacePatternSettings): bo
 
 export const usePatternStore = create<PatternState>((set, get) => ({
   placements: {},
+  patternCoherence: 'individual',
+
+  setPatternCoherence: (mode) => set({ patternCoherence: mode }),
 
   getSettings: (surfaceId) => {
     return get().placements[surfaceId]?.settings ?? { ...DEFAULT_PATTERN_SETTINGS }
