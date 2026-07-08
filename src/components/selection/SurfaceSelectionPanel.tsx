@@ -1,17 +1,84 @@
 import clsx from 'clsx'
 import { X } from 'lucide-react'
+import type { Mesh } from 'three'
 import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
 import { ToggleRow } from '../ui/ToggleRow'
 import { useAppStore } from '../../store/useAppStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { usePatternStore, type PatternCoherenceMode } from '../../store/usePatternStore'
+import { usePartTransformStore, type Axis } from '../../store/usePartTransformStore'
 import {
   MAX_ANGLE_TOLERANCE,
   MIN_ANGLE_TOLERANCE,
   type SelectionMode,
 } from '../../types/surfaceSelection'
 import { formatArea, formatNormal } from '../../lib/surface/buildSelectedSurfaceGeometry'
+
+const AXES: Axis[] = ['x', 'y', 'z']
+
+function PartTransformControls({ meshUuid }: { meshUuid: string }) {
+  const modelRoot = useSurfaceSelectionStore((s) => s.modelRoot)
+  const entry = usePartTransformStore((s) => s.entries[meshUuid])
+  const setRotation = usePartTransformStore((s) => s.setRotation)
+  const setScale = usePartTransformStore((s) => s.setScale)
+  const resetPart = usePartTransformStore((s) => s.resetPart)
+
+  const mesh = modelRoot?.getObjectByProperty('uuid', meshUuid) as Mesh | undefined
+  const scaleMultiplier = entry?.scaleMultiplier ?? 1
+  const hasOverride = !!entry
+
+  if (!mesh) return null
+
+  return (
+    <div className="mt-4 pt-3 border-t border-purple-500/10 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-purple-300">Rotate / scale part</span>
+        {hasOverride && (
+          <button
+            type="button"
+            onClick={() => resetPart(mesh)}
+            className="text-[10px] text-slate-400 hover:text-purple-300"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+
+      {AXES.map((axis) => (
+        <div key={axis}>
+          <label className="block text-xs text-slate-400 mb-2">
+            Rotate {axis.toUpperCase()} — {(entry?.rotationDeltaDeg[axis] ?? 0).toFixed(0)}°
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={360}
+            step={1}
+            value={entry?.rotationDeltaDeg[axis] ?? 0}
+            onChange={(e) => setRotation(mesh, axis, Number(e.target.value))}
+            className="w-full accent-purple-500"
+          />
+        </div>
+      ))}
+
+      <div>
+        <label className="block text-xs text-slate-400 mb-2">
+          Scale — {scaleMultiplier.toFixed(2)}x
+        </label>
+        <input
+          type="range"
+          min={0.1}
+          max={4}
+          step={0.05}
+          value={scaleMultiplier}
+          onChange={(e) => setScale(mesh, Number(e.target.value))}
+          className="w-full accent-purple-500"
+        />
+      </div>
+    </div>
+  )
+}
 
 function StatRow({ label, value }: { label: string; value: string | number }) {
   return (
@@ -153,6 +220,9 @@ export function SurfaceSelectionPanel() {
             {isSurfaceMode && <StatRow label="Threshold" value={`${angleTolerance.toFixed(0)}°`} />}
             <StatRow label="Normal" value={formatNormal(selectedSurface.normal)} />
             <StatRow label="Area" value={formatArea(selectedSurface.area)} />
+            {selectedSurface.selectionType === 'part' && (
+              <PartTransformControls meshUuid={selectedSurface.meshUuid} />
+            )}
             {selectionCount > 1 && (
               <>
                 <p className="text-[10px] text-slate-500 pt-1">

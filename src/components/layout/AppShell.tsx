@@ -5,6 +5,7 @@ import { BottomStatusBar } from './BottomStatusBar'
 import { ViewerCanvas } from '../viewer/ViewerCanvas'
 import { useAppStore } from '../../store/useAppStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
+import { usePartTransformStore } from '../../store/usePartTransformStore'
 import { teardownLoadedModel } from '../../lib/model/teardownModel'
 
 export function AppShell() {
@@ -14,11 +15,13 @@ export function AppShell() {
     return () => {
       teardownLoadedModel(useAppStore.getState().loadedModel)
       useSurfaceSelectionStore.getState().reset()
+      usePartTransformStore.getState().clear()
     }
   }, [])
 
   useEffect(() => {
     useSurfaceSelectionStore.getState().setModelRoot(loadedModel?.object ?? null)
+    usePartTransformStore.getState().clear()
   }, [loadedModel?.object.uuid])
 
   return (

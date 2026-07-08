@@ -4,6 +4,7 @@ import { PerspectiveCamera } from '@react-three/drei'
 import { Loader2, Box, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { isWebGLAvailable } from '../../lib/three/webgl'
+import { useHandleModelFile } from '../../lib/loaders/useHandleModelFile'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 import { FloorGrid } from './FloorGrid'
 import { ModelRenderer } from './ModelRenderer'
@@ -103,9 +104,27 @@ export function ViewerCanvas() {
   const isLoading = useAppStore((s) => s.isLoading)
   const error = useAppStore((s) => s.error)
   const [webglOk] = useState(() => isWebGLAvailable())
+  const handleFile = useHandleModelFile()
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isLoading) return
+    const file = e.dataTransfer.files[0]
+    if (file) void handleFile(file)
+  }
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
 
   return (
-    <div className="viewer-shell relative flex-1 min-h-[280px] w-full rounded-xl overflow-hidden border border-purple-500/15 panel-glow">
+    <div
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      className="viewer-shell relative flex-1 min-h-[280px] w-full rounded-xl overflow-hidden border border-purple-500/15 panel-glow"
+    >
       {webglOk ? (
         <div className="viewer-canvas-host">
           <ViewerErrorBoundary

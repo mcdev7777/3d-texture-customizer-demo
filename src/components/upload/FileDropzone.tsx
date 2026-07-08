@@ -1,22 +1,10 @@
-import { useCallback, useRef } from 'react'
+import { useRef } from 'react'
 import { Upload, FileBox } from 'lucide-react'
 import clsx from 'clsx'
 import { Button } from '../ui/Button'
 import { useAppStore } from '../../store/useAppStore'
-import {
-  loadModelFromFile,
-  parseFileType,
-} from '../../lib/loaders/loadModel'
-import { teardownLoadedModel } from '../../lib/model/teardownModel'
+import { useHandleModelFile } from '../../lib/loaders/useHandleModelFile'
 import { ACCEPTED_FILE_EXTENSIONS } from '../../types/model'
-
-function yieldToMain(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => {
-      setTimeout(resolve, 0)
-    })
-  })
-}
 
 interface FileDropzoneProps {
   compact?: boolean
@@ -24,52 +12,8 @@ interface FileDropzoneProps {
 
 export function FileDropzone({ compact }: FileDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const loadGenerationRef = useRef(0)
   const isLoading = useAppStore((s) => s.isLoading)
-  const setLoading = useAppStore((s) => s.setLoading)
-  const setError = useAppStore((s) => s.setError)
-  const setLoadedModel = useAppStore((s) => s.setLoadedModel)
-
-  const handleFile = useCallback(
-    async (file: File) => {
-      if (isLoading) return
-
-      const fileType = parseFileType(file.name)
-      if (!fileType) {
-        setError(
-          `Unsupported file type "${file.name.split('.').pop() ?? ''}". Supported: .stl, .obj, .glb, .gltf, .3mf`,
-        )
-        return
-      }
-
-      const generation = ++loadGenerationRef.current
-      setLoading(true)
-      setError(null)
-      await yieldToMain()
-
-      const previousModel = useAppStore.getState().loadedModel
-
-      try {
-        const newModel = await loadModelFromFile(file)
-        if (generation !== loadGenerationRef.current) {
-          teardownLoadedModel(newModel)
-          return
-        }
-
-        teardownLoadedModel(previousModel)
-        setLoadedModel(newModel, file.name, fileType)
-      } catch (err) {
-        if (generation === loadGenerationRef.current) {
-          setError(err instanceof Error ? err.message : 'Failed to load model.')
-        }
-      } finally {
-        if (generation === loadGenerationRef.current) {
-          setLoading(false)
-        }
-      }
-    },
-    [isLoading, setLoading, setError, setLoadedModel],
-  )
+  const handleFile = useHandleModelFile()
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
