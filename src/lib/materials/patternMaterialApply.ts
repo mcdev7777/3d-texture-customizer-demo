@@ -169,6 +169,12 @@ function getOriginalMaterial(state: MeshPatternState): Material {
 // so raycasting/selection against the rest of the mesh is unaffected.
 const hiddenCommittedMeshes = new Set<string>()
 
+// Base surfaceIds (unprefixed) whose in-progress preview region should
+// likewise render invisible on the original mesh — used when the 3D Preview
+// overlay is baking a not-yet-applied selection, so the flat 2D bump preview
+// underneath doesn't show through/behind the extruded overlay.
+const hiddenPreviewBaseIds = new Map<string, Set<string>>()
+
 function createInvisibleMaterial(): Material {
   return new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
 }
@@ -179,8 +185,15 @@ function createRegionMaterial(
   state: MeshPatternState,
   region: PatternRegion,
 ): Material {
-  if (hiddenCommittedMeshes.has(mesh.uuid) && !isPreviewRegion(region.surfaceId)) {
+  const isPreview = isPreviewRegion(region.surfaceId)
+  if (!isPreview && hiddenCommittedMeshes.has(mesh.uuid)) {
     return createInvisibleMaterial()
+  }
+  if (isPreview) {
+    const baseId = region.surfaceId.slice(PREVIEW_PREFIX.length)
+    if (hiddenPreviewBaseIds.get(mesh.uuid)?.has(baseId)) {
+      return createInvisibleMaterial()
+    }
   }
   const baseMaterial = resolveMeshRegionMaterial(
     state.pristineGeometry,
@@ -415,18 +428,25 @@ export function collectAllExportRegionsForMesh(
   modelRoot: Object3D,
   placements: Record<string, SurfacePatternPlacement>,
   committedSurfaceIds: readonly string[],
+  previewSurfaceIds: readonly string[] = [],
 ): PatternRegion[] {
   const committed = new Set(committedSurfaceIds)
+  const preview = new Set(previewSurfaceIds)
   const regions: PatternRegion[] = []
   const seen = new Set<string>()
   const state = meshStates.get(mesh.uuid)
 
   if (state) {
     for (const region of state.regions) {
-      if (isPreviewRegion(region.surfaceId)) continue
-      if (!committed.has(region.surfaceId)) continue
+      const isPreview = isPreviewRegion(region.surfaceId)
+      const baseId = isPreview ? region.surfaceId.slice(PREVIEW_PREFIX.length) : region.surfaceId
+      if (isPreview) {
+        if (!preview.has(baseId)) continue
+      } else if (!committed.has(baseId)) {
+        continue
+      }
 
-      const placement = placements[region.surfaceId]
+      const placement = placements[baseId]
       const settings = {
         ...region.settings,
         ...(placement?.settings ?? {}),
@@ -434,7 +454,7 @@ export function collectAllExportRegionsForMesh(
       if (!settings.patternId) continue
 
       regions.push({
-        surfaceId: region.surfaceId,
+        surfaceId: baseId,
         triangleIndices: region.triangleIndices,
         settings,
         normal: region.normal.clone(),
@@ -446,11 +466,11 @@ export function collectAllExportRegionsForMesh(
           ? { min: region.sharedBoundsWorld.min.clone(), max: region.sharedBoundsWorld.max.clone() }
           : undefined,
       })
-      seen.add(region.surfaceId)
+      seen.add(baseId)
     }
   }
 
-  for (const surfaceId of committedSurfaceIds) {
+  for (const surfaceId of [...committedSurfaceIds, ...previewSurfaceIds]) {
     if (seen.has(surfaceId)) continue
 
     const placement = placements[surfaceId]
@@ -859,12 +879,55 @@ export function setCommittedRegionsHiddenForMesh(
   rebuildMesh(mesh, modelRoot, state.regions)
 }
 
+/**
+ * Toggle whether specific in-progress preview regions (identified by their
+ * unprefixed surfaceId) render invisible on the original mesh — the preview
+ * counterpart to `setCommittedRegionsHiddenForMesh`, used when 3D Preview is
+ * baking a not-yet-applied selection into an overlay.
+ */
+export function setPreviewRegionsHiddenForMesh(
+  modelRoot: Object3D,
+  meshUuid: string,
+  hiddenBaseIds: readonly string[],
+): void {
+  if (hiddenBaseIds.length === 0) hiddenPreviewBaseIds.delete(meshUuid)
+  else hiddenPreviewBaseIds.set(meshUuid, new Set(hiddenBaseIds))
+
+  const mesh = findMeshByUuid(modelRoot, meshUuid)
+  const state = meshStates.get(meshUuid)
+  if (!mesh || !state) return
+  rebuildMesh(mesh, modelRoot, state.regions)
+}
+
 /** True when `faceIndex` (pristine indexing) belongs to an already-committed (applied) region on `mesh`. */
 export function isTriangleInCommittedRegion(mesh: Mesh, faceIndex: number): boolean {
   const state = meshStates.get(mesh.uuid)
   if (!state) return false
   for (const region of state.regions) {
     if (isPreviewRegion(region.surfaceId)) continue
+    if (region.triangleIndices.includes(faceIndex)) return true
+  }
+  return false
+}
+
+/**
+ * True when `faceIndex` belongs to any region currently hidden behind a 3D
+ * Preview overlay — committed (applied) or an in-progress preview selection
+ * — so raycast/selection can skip it the same way for both.
+ */
+export function isTriangleInHiddenPreviewRegion(mesh: Mesh, faceIndex: number): boolean {
+  const state = meshStates.get(mesh.uuid)
+  if (!state) return false
+  const hiddenBaseIds = hiddenPreviewBaseIds.get(mesh.uuid)
+  const committedHidden = hiddenCommittedMeshes.has(mesh.uuid)
+  for (const region of state.regions) {
+    const isPreview = isPreviewRegion(region.surfaceId)
+    if (isPreview) {
+      const baseId = region.surfaceId.slice(PREVIEW_PREFIX.length)
+      if (!hiddenBaseIds?.has(baseId)) continue
+    } else if (!committedHidden) {
+      continue
+    }
     if (region.triangleIndices.includes(faceIndex)) return true
   }
   return false
@@ -883,6 +946,7 @@ export function resetMeshPatterns(mesh: Mesh): void {
   unregisterMeshPristineGeometry(mesh.uuid)
   meshStates.delete(mesh.uuid)
   hiddenCommittedMeshes.delete(mesh.uuid)
+  hiddenPreviewBaseIds.delete(mesh.uuid)
 }
 
 export function resetAllPatterns(modelRoot: Object3D | null): void {
