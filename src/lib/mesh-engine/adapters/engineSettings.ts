@@ -137,6 +137,17 @@ export function buildPipelineSettings(
   )
   const refineLength = clampEdgeToTriangleBudget(positions, finestRawEdge, triBudget)
 
+  // Whole-part selections want the pattern on every surface, including the
+  // underside — the bottomAngleLimit/smoothBottom print-bed-flatness
+  // protection (masks displacement near-flat-downward faces during
+  // applyDisplacement, then re-flattens anything left near the mesh's global
+  // min Z via clampBelowBottom/snapBottomToFlat) exists to keep a
+  // face/triangle-brush selection's bed-contact face flat, but it silently
+  // erases relief on a part selection's bottom surface, which reads as "the
+  // pattern doesn't apply to the bottom". Disable it whenever any region in
+  // this export is a full-part selection.
+  const hasPartSelection = regions.some((r) => r.selectionType === 'part')
+
   // The displacement-only fields below (mappingMode..blendNormalSmoothing)
   // are dead weight here: the multi-layer pipeline path reads amplitude/
   // mapping/etc. from each `layers[i].settings` (buildLayerSettings), never
@@ -159,9 +170,9 @@ export function buildPipelineSettings(
     blendNormalSmoothing: 32,
     refineLength,
     maxTriangles: getExportOutputTriangles(quality),
-    bottomAngleLimit: 5,
+    bottomAngleLimit: hasPartSelection ? 0 : 5,
     topAngleLimit: 0,
-    smoothBottom: true,
+    smoothBottom: !hasPartSelection,
     harvestFlatFaces: true,
     harvestTol: 0.005,
     regularizeEnabled: true,
