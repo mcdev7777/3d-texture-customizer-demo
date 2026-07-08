@@ -240,7 +240,10 @@ export async function bakeReliefIntoGeometry(
   )
 
   const worldSampleNormal = region.normal.clone().normalize()
-  const reliefSmoothing = Math.max(region.settings.smoothing ?? 0, 0.35)
+  // Fully smoothstep-shaped relief edges (max softness) — at least 5x softer
+  // than the previous 0.35 floor, since 0.35 was already close to the
+  // shapeReliefHeight blend's ceiling of 1.
+  const reliefSmoothing = 1
 
   const sampleReliefHeightAtVertex = (vertexIndex: number): number => {
     const o = vertexIndex * 3

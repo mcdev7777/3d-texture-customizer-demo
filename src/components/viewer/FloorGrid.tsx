@@ -5,12 +5,13 @@ import { useAppStore } from '../../store/useAppStore'
 
 export function FloorGrid() {
   const showGrid = useAppStore((s) => s.viewerSettings.showGrid)
+  const isBottomView = useAppStore((s) => s.isBottomView)
 
   const matColor = useMemo(() => '#1a3d2e', [])
   const sectionColor = useMemo(() => '#2d5a45', [])
   const cellColor = useMemo(() => '#234a38', [])
 
-  if (!showGrid) return null
+  if (!showGrid || isBottomView) return null
 
   return (
     <group position={[0, 0, -0.01]}>

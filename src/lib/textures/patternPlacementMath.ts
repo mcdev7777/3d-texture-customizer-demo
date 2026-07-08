@@ -69,8 +69,8 @@ export function depthLevelToWorld(level: number): number {
   return DEPTH_BUMP_MIN + curved * (DEPTH_BUMP_MAX - DEPTH_BUMP_MIN)
 }
 
-/** Contrast applied to mask values so pattern edges stay crisp. */
-const MASK_CONTRAST = 1.35
+/** Contrast applied to mask values; lowered well below 1 to soften pattern edges. */
+const MASK_CONTRAST = 0.27
 
 export function applyContrast(value: number, contrast = MASK_CONTRAST): number {
   return clamp01((value - 0.5) * contrast + 0.5)

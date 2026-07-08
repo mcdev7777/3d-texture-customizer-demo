@@ -16,6 +16,7 @@ interface AppState {
   isLoading: boolean
   error: string | null
   cameraActions: CameraActions | null
+  isBottomView: boolean
 
   setLoadedModel: (
     model: LoadedModel | null,
@@ -29,6 +30,7 @@ interface AppState {
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   setCameraActions: (actions: CameraActions | null) => void
+  setIsBottomView: (isBottomView: boolean) => void
   clearModel: () => void
 }
 
@@ -48,6 +50,7 @@ export const useAppStore = create<AppState>((set) => ({
   isLoading: false,
   error: null,
   cameraActions: null,
+  isBottomView: false,
 
   setLoadedModel: (model, fileName, fileType) =>
     set({
@@ -68,6 +71,8 @@ export const useAppStore = create<AppState>((set) => ({
   setError: (error) => set({ error, isLoading: false }),
 
   setCameraActions: (actions) => set({ cameraActions: actions }),
+
+  setIsBottomView: (isBottomView) => set({ isBottomView }),
 
   clearModel: () =>
     set({

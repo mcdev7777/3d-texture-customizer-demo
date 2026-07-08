@@ -10,10 +10,16 @@ import {
   getDefaultCameraPosition,
 } from '../../lib/three/fitCameraToObject'
 
+// Camera polar angle (radians, measured from the up axis) beyond which the
+// camera looks up at the model's underside; the grid is hidden past this so
+// it doesn't block the bottom view.
+const BOTTOM_VIEW_POLAR_ANGLE = Math.PI * 0.55
+
 export function CameraController() {
   const controlsRef = useRef<OrbitControls>(null)
   const { camera } = useThree()
   const setCameraActions = useAppStore((s) => s.setCameraActions)
+  const setIsBottomView = useAppStore((s) => s.setIsBottomView)
   const loadedModel = useAppStore((s) => s.loadedModel)
   const lastFittedModelId = useRef<string | null>(null)
 
@@ -48,8 +54,11 @@ export function CameraController() {
 
     setCameraActions({ reset, fit })
 
-    return () => setCameraActions(null)
-  }, [camera, loadedModel, setCameraActions])
+    return () => {
+      setCameraActions(null)
+      setIsBottomView(false)
+    }
+  }, [camera, loadedModel, setCameraActions, setIsBottomView])
 
   useEffect(() => {
     const controls = controlsRef.current
@@ -66,6 +75,12 @@ export function CameraController() {
     fitCameraToObject(perspCamera, controls, loadedModel.object)
   }, [loadedModel, camera])
 
+  const handleControlsChange = () => {
+    const controls = controlsRef.current
+    if (!controls) return
+    setIsBottomView(controls.getPolarAngle() > BOTTOM_VIEW_POLAR_ANGLE)
+  }
+
   return (
     <DreiOrbitControls
       ref={controlsRef}
@@ -75,6 +90,7 @@ export function CameraController() {
       minDistance={0.5}
       maxDistance={150}
       maxPolarAngle={Math.PI}
+      onChange={handleControlsChange}
     />
   )
 }

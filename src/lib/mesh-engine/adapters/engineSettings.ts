@@ -42,7 +42,7 @@ export function buildRegularizeOpts(): RegularizeOpts {
 // millions of triangles; capped at BumpMesh's own "Smart" recommendation
 // ceiling (2M) as an absolute backstop.
 const SUBDIVISION_BUDGET_MULTIPLIER = 8
-const SUBDIVISION_BUDGET_CEILING = 2_000_000
+const SUBDIVISION_BUDGET_CEILING = 20_000_000
 
 /**
  * Feature-size-adaptive subdivision edge length, in mm — mirrors
