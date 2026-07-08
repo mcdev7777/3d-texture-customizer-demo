@@ -117,15 +117,15 @@ export function Pattern3DPreviewOverlay() {
     // forever with no overlay to replace it (the part "disappears" until
     // some later, uncancelled run happens to reconcile it — e.g. toggling
     // back to 2D and forcing a fresh render).
-    function revertPartialHides(nextHidden: Set<string>, nextHiddenPreview: Set<string>) {
+    function revertPartialHides(root: NonNullable<typeof modelObject>, nextHidden: Set<string>, nextHiddenPreview: Set<string>) {
       for (const meshUuid of nextHidden) {
         if (!hiddenMeshUuidsRef.current.has(meshUuid)) {
-          setCommittedRegionsHiddenForMesh(modelObject, meshUuid, false)
+          setCommittedRegionsHiddenForMesh(root, meshUuid, false)
         }
       }
       for (const meshUuid of nextHiddenPreview) {
         if (!hiddenPreviewMeshUuidsRef.current.has(meshUuid)) {
-          setPreviewRegionsHiddenForMesh(modelObject, meshUuid, [])
+          setPreviewRegionsHiddenForMesh(root, meshUuid, [])
         }
       }
     }
@@ -158,7 +158,7 @@ export function Pattern3DPreviewOverlay() {
           meshPreviewIds,
         )
         if (cancelled) {
-          revertPartialHides(nextHidden, nextHiddenPreview)
+          revertPartialHides(modelObject, nextHidden, nextHiddenPreview)
           return
         }
         if (!result || !result.normals) continue
@@ -193,7 +193,7 @@ export function Pattern3DPreviewOverlay() {
       }
 
       if (cancelled) {
-        revertPartialHides(nextHidden, nextHiddenPreview)
+        revertPartialHides(modelObject, nextHidden, nextHiddenPreview)
         return
       }
 
