@@ -264,13 +264,14 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
           layerWeights[o] = w; layerWeights[o + 1] = w; layerWeights[o + 2] = w;
         }
         current.setAttribute('excludeWeight', new THREE.Float32BufferAttribute(layerWeights, 1));
+        const layerBounds = layer.bounds ? reviveBounds(layer.bounds) : bounds;
         const next = applyDisplacement(
           current,
           layer.imageData,
           layer.imgWidth,
           layer.imgHeight,
           layer.settings,
-          bounds,
+          layerBounds,
           (p) => onEvent('displace', (li + p) / layers.length, { triCount: subTriCount })
         );
         current.dispose();

@@ -1,4 +1,4 @@
-import type { Mesh, Object3D } from 'three'
+import type { Mesh, Object3D, Vector3 } from 'three'
 import type { ExportQuality } from '../../../types/bake'
 import type { SurfacePatternPlacement } from '../../../types/pattern'
 import { collectAllExportRegionsForMesh } from '../../materials/patternMaterialApply'
@@ -9,7 +9,28 @@ import { buildFaceWeights, buildTriangleSet, collectCommittedTriangles } from '.
 import { computeEngineBounds } from './engineBounds'
 import { collectMeshTriangleSoup } from './collectMeshPositions'
 import { runMeshPipeline } from './runMeshPipeline'
-import type { EngineLayer, PipelineEventHandler, RepairStats } from '../exportPipeline'
+import type { EngineBounds, EngineLayer, PipelineEventHandler, RepairStats } from '../exportPipeline'
+
+/**
+ * Converts a viewer-world-space min/max (shared across a cross-mesh "Merged"
+ * pattern group — see PatternRegion.sharedBoundsWorld) into the mesh-engine's
+ * plain EngineBounds shape, scaled into whatever linear unit this bake call's
+ * `positions` soup is in (mm for export, viewer-normalized for 3D preview).
+ */
+function sharedBoundsToEngineBounds(min: Vector3, max: Vector3, positionScale: number): EngineBounds {
+  const minX = min.x * positionScale
+  const minY = min.y * positionScale
+  const minZ = min.z * positionScale
+  const maxX = max.x * positionScale
+  const maxY = max.y * positionScale
+  const maxZ = max.z * positionScale
+  return {
+    min: { x: minX, y: minY, z: minZ },
+    max: { x: maxX, y: maxY, z: maxZ },
+    size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
+    center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 },
+  }
+}
 
 export interface BakeMeshRegionsResult {
   positions: Float32Array
@@ -73,6 +94,9 @@ export async function bakeMeshRegions(
       imgWidth: texture.width,
       imgHeight: texture.height,
       settings: buildLayerSettings(region, amplitude),
+      bounds: region.sharedBoundsWorld
+        ? sharedBoundsToEngineBounds(region.sharedBoundsWorld.min, region.sharedBoundsWorld.max, soupScale)
+        : undefined,
     }
   })
 

@@ -2,7 +2,13 @@ import { create } from 'zustand'
 import type { BakeStatus, ExportFormat, ExportQuality } from '../types/bake'
 import { DEFAULT_EXPORT_QUALITY } from '../types/bake'
 import type { ExportProgressState } from '../lib/export/exportProgress'
-import { commitPatternMaterial, resetAllPatterns, uncommitSurfacePattern } from '../lib/materials/patternMaterialApply'
+import {
+  commitMergedPatternMaterial,
+  commitPatternMaterial,
+  computeSharedWorldBounds,
+  resetAllPatterns,
+  uncommitSurfacePattern,
+} from '../lib/materials/patternMaterialApply'
 import { exportModifiedModel } from '../lib/export/exportModifiedModel'
 import { warmupPipelineWorker } from '../lib/mesh-engine/adapters/runMeshPipeline'
 import { findMeshByUuid } from '../lib/surface/restoreSurfaceFromId'
@@ -102,29 +108,93 @@ export const useBakeStore = create<BakeState>((set, get) => {
 
     try {
       const placements = usePatternStore.getState().placements
+      const coherence = patternStore.patternCoherence
 
-      for (const surface of targets) {
-        const entry = placements[surface.surfaceId]
-        if (!entry?.settings.patternId) {
-          warnings.push(`Skipped ${surface.meshName}: no texture chosen.`)
-          continue
+      if (coherence === 'merged' && targets.length > 1) {
+        // A PatternRegion's triangles can only reference one mesh's own
+        // geometry, so a merge that spans several meshes is still N regions
+        // under the hood — group by mesh to build them. But the whole
+        // *selection* is meant to read as one object: when it spans more
+        // than one mesh, every one of those per-mesh regions shares the same
+        // combined world-space bounds (computed once, across all targets)
+        // instead of each computing its own — otherwise each mesh's chunk
+        // still looks like its own independent pattern, which is exactly the
+        // "still per-surface/per-part" symptom this is fixing. A mesh that
+        // contributes only one surface to the group still gets folded into
+        // that shared frame via commitMergedPatternMaterial, not treated as
+        // a lone individual placement.
+        const byMesh = new Map<string, typeof targets>()
+        for (const surface of targets) {
+          const list = byMesh.get(surface.meshUuid) ?? []
+          list.push(surface)
+          byMesh.set(surface.meshUuid, list)
         }
 
-        const sourceMesh = findMeshByUuid(loadedModel.object, surface.meshUuid)
-        if (!sourceMesh) {
-          warnings.push(`Skipped ${surface.meshName}: mesh not found.`)
-          continue
-        }
+        const sharedBounds =
+          byMesh.size > 1 ? computeSharedWorldBounds(loadedModel.object, targets) : undefined
 
-        try {
-          commitPatternMaterial(sourceMesh, loadedModel.object, surface, entry.settings)
-          if (!committedSurfaceIds.includes(surface.surfaceId)) {
-            committedSurfaceIds = [...committedSurfaceIds, surface.surfaceId]
+        for (const [meshUuid, group] of byMesh) {
+          const sourceMesh = findMeshByUuid(loadedModel.object, meshUuid)
+          if (!sourceMesh) {
+            warnings.push(`Skipped ${group[0]!.meshName}: mesh not found.`)
+            continue
           }
-          appliedCount++
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Apply failed.'
-          warnings.push(`Could not apply to ${surface.meshName}: ${message}`)
+
+          const primary = group.find((s) => s.surfaceId === active.surfaceId) ?? group[0]!
+          const entry = placements[primary.surfaceId]
+          if (!entry?.settings.patternId) {
+            warnings.push(`Skipped ${primary.meshName}: no texture chosen.`)
+            continue
+          }
+          try {
+            commitMergedPatternMaterial(
+              sourceMesh,
+              loadedModel.object,
+              group,
+              entry.settings,
+              primary.surfaceId,
+              sharedBounds,
+            )
+            // The merged region absorbs every group member's surfaceId —
+            // only the primary needs tracking; drop the others so they
+            // don't linger as stale/duplicate committed ids.
+            const groupIds = new Set(group.map((s) => s.surfaceId))
+            committedSurfaceIds = committedSurfaceIds.filter(
+              (id) => !groupIds.has(id) || id === primary.surfaceId,
+            )
+            if (!committedSurfaceIds.includes(primary.surfaceId)) {
+              committedSurfaceIds = [...committedSurfaceIds, primary.surfaceId]
+            }
+            appliedCount += group.length
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Apply failed.'
+            warnings.push(`Could not merge-apply on ${primary.meshName}: ${message}`)
+          }
+        }
+      } else {
+        for (const surface of targets) {
+          const entry = placements[surface.surfaceId]
+          if (!entry?.settings.patternId) {
+            warnings.push(`Skipped ${surface.meshName}: no texture chosen.`)
+            continue
+          }
+
+          const sourceMesh = findMeshByUuid(loadedModel.object, surface.meshUuid)
+          if (!sourceMesh) {
+            warnings.push(`Skipped ${surface.meshName}: mesh not found.`)
+            continue
+          }
+
+          try {
+            commitPatternMaterial(sourceMesh, loadedModel.object, surface, entry.settings)
+            if (!committedSurfaceIds.includes(surface.surfaceId)) {
+              committedSurfaceIds = [...committedSurfaceIds, surface.surfaceId]
+            }
+            appliedCount++
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Apply failed.'
+            warnings.push(`Could not apply to ${surface.meshName}: ${message}`)
+          }
         }
       }
 

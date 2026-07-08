@@ -65,6 +65,16 @@ export interface EngineLayer {
   imgWidth: number
   imgHeight: number
   settings: EngineLayerSettings
+  /**
+   * Overrides the pipeline-wide `bounds` for this layer's cubic-mapping UV
+   * scale reference (`md` in mapping.js). Used for a "Merged" pattern group
+   * that spans multiple meshes: each mesh is baked in its own separate
+   * pipeline call, so without this override each one's cubic mapping would
+   * scale against its own mesh's bounds instead of the whole merged
+   * selection's — the same pattern would land at a different scale/alignment
+   * on each mesh instead of reading as one continuous surface.
+   */
+  bounds?: EngineBounds
 }
 
 export interface PipelineInput {

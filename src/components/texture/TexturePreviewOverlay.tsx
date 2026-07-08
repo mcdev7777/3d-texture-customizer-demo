@@ -5,6 +5,7 @@ import { usePatternStore } from '../../store/usePatternStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { useBakeStore } from '../../store/useBakeStore'
 import {
+  computeSharedWorldBounds,
   removePreviewPattern,
   syncMeshPreviewPatterns,
   updateCommittedRegionSettings,
@@ -49,6 +50,7 @@ export function TexturePreviewOverlay() {
   const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
   const activeSurfaceId = useSurfaceSelectionStore((s) => s.activeSurfaceId)
   const placements = usePatternStore((s) => s.placements)
+  const patternCoherence = usePatternStore((s) => s.patternCoherence)
   const previewActive = useBakeStore((s) => s.previewActive)
   const committedSurfaceIds = useBakeStore((s) => s.committedSurfaceIds)
 
@@ -114,8 +116,33 @@ export function TexturePreviewOverlay() {
 
     try {
       if (previewActive) {
+        const coherence = patternStore.patternCoherence
+        const mergeActive = coherence === 'merged' && selectedSurfaces.length > 1
+        // Mirrors useBakeStore.applyTexture's merged-commit branch: only
+        // override each mesh's own bounds with one shared world-space frame
+        // when the merge spans more than one mesh — a single-mesh merge's
+        // own region bounds already cover its full triangle union.
+        const sharedBounds =
+          mergeActive && previewsByMesh.size > 1
+            ? computeSharedWorldBounds(modelObject, selectedSurfaces)
+            : undefined
+
         for (const { mesh, items } of previewsByMesh.values()) {
-          syncMeshPreviewPatterns(mesh, modelObject, items)
+          // A mesh that contributes only ONE surface to a merged group still
+          // needs the merge path (cubic mapping + shared bounds) — otherwise
+          // it falls back to its own independent tangent-plane projection,
+          // which is exactly the "disconnected surfaces don't read as one
+          // imagined surface" bug: two mesh bodies on opposite sides of a
+          // gap each contribute a single surface, so a `items.length > 1`
+          // check here never merges them.
+          if (mergeActive) {
+            const primarySurfaceId =
+              items.find((item) => item.surface.surfaceId === activeSurfaceId)?.surface.surfaceId ??
+              items[0]!.surface.surfaceId
+            syncMeshPreviewPatterns(mesh, modelObject, items, { primarySurfaceId, sharedBoundsWorld: sharedBounds })
+          } else {
+            syncMeshPreviewPatterns(mesh, modelObject, items)
+          }
         }
       } else {
         for (const surface of selectedSurfaces) {
@@ -182,6 +209,7 @@ export function TexturePreviewOverlay() {
     activeSurfaceId,
     modelObject,
     placementKey,
+    patternCoherence,
   ])
 
   useEffect(() => {
