@@ -111,6 +111,25 @@ export function Pattern3DPreviewOverlay() {
       previewIdsByMesh.set(parsed.meshUuid, list)
     }
 
+    // If this pass is cancelled mid-flight, undo any hides it already
+    // applied that weren't already hidden before this pass started —
+    // otherwise a superseded run can leave a mesh's flat region hidden
+    // forever with no overlay to replace it (the part "disappears" until
+    // some later, uncancelled run happens to reconcile it — e.g. toggling
+    // back to 2D and forcing a fresh render).
+    function revertPartialHides(nextHidden: Set<string>, nextHiddenPreview: Set<string>) {
+      for (const meshUuid of nextHidden) {
+        if (!hiddenMeshUuidsRef.current.has(meshUuid)) {
+          setCommittedRegionsHiddenForMesh(modelObject, meshUuid, false)
+        }
+      }
+      for (const meshUuid of nextHiddenPreview) {
+        if (!hiddenPreviewMeshUuidsRef.current.has(meshUuid)) {
+          setPreviewRegionsHiddenForMesh(modelObject, meshUuid, [])
+        }
+      }
+    }
+
     void (async () => {
       const nextHidden = new Set<string>()
       const nextHiddenPreview = new Set<string>()
@@ -138,7 +157,10 @@ export function Pattern3DPreviewOverlay() {
           undefined,
           meshPreviewIds,
         )
-        if (cancelled) return
+        if (cancelled) {
+          revertPartialHides(nextHidden, nextHiddenPreview)
+          return
+        }
         if (!result || !result.normals) continue
 
         let overlay = overlaysRef.current.get(meshUuid)
@@ -170,7 +192,10 @@ export function Pattern3DPreviewOverlay() {
         }
       }
 
-      if (cancelled) return
+      if (cancelled) {
+        revertPartialHides(nextHidden, nextHiddenPreview)
+        return
+      }
 
       // Drop overlays for meshes that no longer have committed/previewed patterns.
       for (const [meshUuid, overlay] of overlaysRef.current) {
