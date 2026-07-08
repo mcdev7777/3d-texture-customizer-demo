@@ -35,7 +35,7 @@ function discMask(dist: number, radius: number, soft: number): number {
 }
 
 const LINE = 0.06
-const SOFT = 0.05
+const SOFT = 0.25
 
 function grid(u: number, v: number): number {
   const d = Math.min(distToNearestInt(u), distToNearestInt(v))
@@ -57,11 +57,11 @@ function dots(u: number, v: number): number {
   const du = frac(u * 8) - 0.5
   const dv = frac(v * 8) - 0.5
   const d = Math.hypot(du, dv)
-  return discMask(d, 0.28, 0.04)
+  return discMask(d, 0.28, 0.2)
 }
 
 function ribbed(_u: number, v: number): number {
-  return lineMask(distToNearestInt(v), 0.24, 0.14)
+  return lineMask(distToNearestInt(v), 0.24, 0.7)
 }
 
 /** Signed distance to a set of infinite lines at three 60° orientations → hex net. */
@@ -88,7 +88,7 @@ function honeycomb(u: number, v: number): number {
 function waves(u: number, v: number): number {
   const rows = 2
   const shifted = v * rows + 0.16 * Math.sin(u * Math.PI * 2)
-  return lineMask(distToNearestInt(shifted), 0.2, 0.16)
+  return lineMask(distToNearestInt(shifted), 0.2, 0.8)
 }
 
 function triangleWave(x: number): number {
@@ -98,15 +98,15 @@ function triangleWave(x: number): number {
 function zigzag(u: number, v: number): number {
   const rows = 2
   const shifted = v * rows + 0.5 * triangleWave(u)
-  return lineMask(distToNearestInt(shifted), 0.18, 0.14)
+  return lineMask(distToNearestInt(shifted), 0.18, 0.7)
 }
 
 function brick(u: number, v: number): number {
   const rows = 2
   const row = Math.floor(v * rows)
   const offset = row % 2 ? 0.5 : 0
-  const mortarH = lineMask(distToNearestInt(v * rows), 0.12, 0.09)
-  const mortarV = lineMask(distToNearestInt(u * rows + offset), 0.1, 0.08)
+  const mortarH = lineMask(distToNearestInt(v * rows), 0.12, 0.45)
+  const mortarV = lineMask(distToNearestInt(u * rows + offset), 0.1, 0.4)
   // Bricks raised, mortar recessed.
   return 1 - Math.max(mortarH, mortarV)
 }
@@ -119,8 +119,8 @@ function scales(u: number, v: number): number {
   const du = frac(u * rows + offset) - 0.5
   const dv = frac(v * rows) - 0.5
   const d = Math.hypot(du, dv * 1.1)
-  const disc = discMask(d, 0.34, 0.12)
-  const rim = lineMask(Math.abs(d - 0.34), 0.05, 0.05)
+  const disc = discMask(d, 0.34, 0.6)
+  const rim = lineMask(Math.abs(d - 0.34), 0.05, 0.25)
   return Math.max(disc * 0.85, rim)
 }
 
