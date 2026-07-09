@@ -111,6 +111,20 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
   }
 
   const frozen = new Uint8Array(nUnique);
+  // Up to 2 "crease neighbours" per vertex — the two vertices reached via a
+  // crease/boundary edge, i.e. its neighbours along the crease LOOP (a
+  // circular hole rim, a chamfer line). -1 = unset, -2 = more than 2 seen
+  // (irregular junction — leave that vertex fully frozen, no tangential move).
+  const creaseA = new Int32Array(nUnique).fill(-1);
+  const creaseB = new Int32Array(nUnique).fill(-1);
+  const addCreaseNeighbour = (id, other) => {
+    if (creaseA[id] === -2) return;
+    if (creaseA[id] === -1) { creaseA[id] = other; return; }
+    if (creaseA[id] === other) return;
+    if (creaseB[id] === -1) { creaseB[id] = other; return; }
+    if (creaseB[id] === other) return;
+    creaseA[id] = -2; creaseB[id] = -2; // irregular (>2 crease edges) — fully freeze
+  };
   // Second pass over triangles to find, for each edge, its two faces' normals.
   // We already stored face0; re-scan and, when we meet an edge a second time,
   // compare against face0. (A manifold edge has exactly 2 faces.)
@@ -127,12 +141,19 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
         if (f0 === t || secondFaceSeen[id]) continue;
         secondFaceSeen[id] = 1;
         const dot = fnX[f0] * fnX[t] + fnY[f0] * fnY[t] + fnZ[f0] * fnZ[t];
-        if (dot < sharpCos) { frozen[lo] = 1; frozen[hi] = 1; }
+        if (dot < sharpCos) {
+          frozen[lo] = 1; frozen[hi] = 1;
+          addCreaseNeighbour(lo, hi); addCreaseNeighbour(hi, lo);
+        }
       }
     }
     // Boundary / non-manifold edges (incidence ≠ 2) also freeze their ends.
     for (let id = 0; id < nEdges; id++) {
-      if (edgeCount[id] !== 2) { frozen[edgeLo[id]] = 1; frozen[edgeHi[id]] = 1; }
+      if (edgeCount[id] !== 2) {
+        const lo = edgeLo[id], hi = edgeHi[id];
+        frozen[lo] = 1; frozen[hi] = 1;
+        addCreaseNeighbour(lo, hi); addCreaseNeighbour(hi, lo);
+      }
     }
   }
 
@@ -227,7 +248,35 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
   const applyPass = (factor) => {
     for (let id = 0; id < nUnique; id++) {
       const s = csrStart[id], e = csrStart[id + 1];
-      if (frozen[id] || e === s) {
+      if (frozen[id]) {
+        // Crease/boundary vertex (a circular hole rim, a chamfer line, a
+        // model edge). Full 3D smoothing is disabled — that would melt the
+        // sharp feature into the surrounding surface — but the vertex may
+        // still be zigzagging along the crease LOOP itself (inherited from
+        // the source tessellation / decimation), which is what shows up as a
+        // jagged circular rim. When it has exactly two crease neighbours
+        // (interior point of a clean loop), relax it toward their midpoint —
+        // a 1D smoothing pass that slides it along the loop's tangent
+        // direction, rounding the loop out without moving the feature off
+        // the surface it's frozen to. Junctions (creaseA === -2) or loop
+        // endpoints stay fully static.
+        if (creaseA[id] >= 0 && creaseB[id] >= 0) {
+          const na = creaseA[id], nb = creaseB[id];
+          const mx = (curX[na] + curX[nb]) / 2;
+          const my = (curY[na] + curY[nb]) / 2;
+          const mz = (curZ[na] + curZ[nb]) / 2;
+          const cx = curX[id] + factor * (mx - curX[id]);
+          const cy = curY[id] + factor * (my - curY[id]);
+          const cz = curZ[id] + factor * (mz - curZ[id]);
+          if (!moveWouldFold(id, cx, cy, cz, curX, curY, curZ)) {
+            nxtX[id] = cx; nxtY[id] = cy; nxtZ[id] = cz;
+            continue;
+          }
+        }
+        nxtX[id] = curX[id]; nxtY[id] = curY[id]; nxtZ[id] = curZ[id];
+        continue;
+      }
+      if (e === s) {
         nxtX[id] = curX[id]; nxtY[id] = curY[id]; nxtZ[id] = curZ[id];
         continue;
       }

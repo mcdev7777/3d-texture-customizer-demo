@@ -376,6 +376,34 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
       if (shouldAbort()) return null;
     }
 
+    // ── Print invariant (ALWAYS) ─────────────────────────────────────────────
+    // The exported mesh MUST be watertight (0 open edges), manifold (0 edges
+    // with 3+ faces) and free of zero-area slivers, or a slicer will refuse it
+    // / silently auto-repair it (punching holes). Assert on the FINAL geometry
+    // — including the no-decimation path, which skips resolveTJunctions above —
+    // and fail loudly so a regression in smoothing/subdivision/repair can never
+    // ship a broken export silently. See scripts/verify-export.mjs.
+    {
+      const inv = countEdgeDefects(finalGeometry);
+      const invSlivers = countAreaSlivers(finalGeometry);
+      if (!repairStats) {
+        repairStats = {
+          beforeSlivers: invSlivers,
+          open: inv.open,
+          nonManifold: inv.nonManifold,
+          slivers: invSlivers,
+          tris: inv.tris,
+        };
+      }
+      if (inv.open > 0 || inv.nonManifold > 0 || invSlivers > 0) {
+        console.error(
+          `[export invariant VIOLATED] open=${inv.open} nonManifold=${inv.nonManifold} ` +
+          `slivers=${invSlivers} tris=${inv.tris} — exported mesh is NOT print-safe. ` +
+          `This is a bug in the export pipeline (smoothing / subdivision / repair).`,
+        );
+      }
+    }
+
     done = true;
     return {
       positions: finalGeometry.attributes.position.array,
