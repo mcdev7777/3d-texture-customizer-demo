@@ -28,7 +28,6 @@ export function SurfacePicker() {
   const pointerDown = useRef<{ x: number; y: number; id: number; button: number } | null>(null)
 
   const loadedModel = useAppStore((s) => s.loadedModel)
-  const enabled = useSurfaceSelectionStore((s) => s.enabled)
   const selectFromPick = useSurfaceSelectionStore((s) => s.selectFromPick)
   const clearSelection = useSurfaceSelectionStore((s) => s.clearSelection)
   const setModelRoot = useSurfaceSelectionStore((s) => s.setModelRoot)
@@ -38,7 +37,7 @@ export function SurfacePicker() {
   }, [loadedModel, setModelRoot])
 
   useEffect(() => {
-    if (!enabled || !loadedModel) return
+    if (!loadedModel) return
 
     const canvas = gl.domElement
     raycaster.current.firstHitOnly = true
@@ -121,7 +120,7 @@ export function SurfacePicker() {
       canvas.removeEventListener('pointerup', onPointerUp)
       canvas.removeEventListener('pointercancel', onPointerCancel)
     }
-  }, [enabled, loadedModel, camera, gl, selectFromPick, clearSelection])
+  }, [loadedModel, camera, gl, selectFromPick, clearSelection])
 
   return null
 }
