@@ -136,6 +136,68 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
     }
   }
 
+  // ── Per-triangle unique-vertex ids (for the fold-rejection guard) ────────
+  const triV0 = new Int32Array(triCount);
+  const triV1 = new Int32Array(triCount);
+  const triV2 = new Int32Array(triCount);
+  for (let t = 0; t < triCount; t++) {
+    triV0[t] = cornerVid[t * 3];
+    triV1[t] = cornerVid[t * 3 + 1];
+    triV2[t] = cornerVid[t * 3 + 2];
+  }
+
+  // ── CSR vertex → incident triangles (for the fold-rejection guard) ────────
+  const triDeg = new Uint32Array(nUnique);
+  for (let t = 0; t < triCount; t++) {
+    triDeg[triV0[t]]++;
+    if (triV1[t] !== triV0[t]) triDeg[triV1[t]]++;
+    if (triV2[t] !== triV0[t] && triV2[t] !== triV1[t]) triDeg[triV2[t]]++;
+  }
+  const triCsr = new Uint32Array(nUnique + 1);
+  for (let id = 0; id < nUnique; id++) triCsr[id + 1] = triCsr[id] + triDeg[id];
+  const triList = new Uint32Array(triCsr[nUnique]);
+  const triCursor = new Uint32Array(nUnique);
+  for (let t = 0; t < triCount; t++) {
+    const a = triV0[t], b = triV1[t], c = triV2[t];
+    triList[triCsr[a] + triCursor[a]++] = t;
+    if (b !== a) triList[triCsr[b] + triCursor[b]++] = t;
+    if (c !== a && c !== b) triList[triCsr[c] + triCursor[c]++] = t;
+  }
+
+  // Reject a vertex move if any incident triangle would fold (normal rotates
+  // more than ~70° vs. its pre-move direction) or collapse to zero area. This
+  // is what prevents the "destroyed" torn band of inverted triangles at hard
+  // model edges, where near-edge vertices are pulled past frozen edge vertices.
+  const FOLD_COS = Math.cos(70 * Math.PI / 180);
+  const moveWouldFold = (id, nx, ny, nz, X, Y, Z) => {
+    const ox = X[id], oy = Y[id], oz = Z[id];
+    for (let k = triCsr[id]; k < triCsr[id + 1]; k++) {
+      const t = triList[k];
+      const a = triV0[t], b = triV1[t], c = triV2[t];
+      const ax = a === id ? ox : X[a], ay = a === id ? oy : Y[a], az = a === id ? oz : Z[a];
+      const bx = b === id ? ox : X[b], by = b === id ? oy : Y[b], bz = b === id ? oz : Z[b];
+      const cx = c === id ? ox : X[c], cy = c === id ? oy : Y[c], cz = c === id ? oz : Z[c];
+      // current normal
+      let ux = bx - ax, uy = by - ay, uz = bz - az;
+      let vx = cx - ax, vy = cy - ay, vz = cz - az;
+      const cnx = uy * vz - uz * vy, cny = uz * vx - ux * vz, cnz = ux * vy - uy * vx;
+      const cl2 = cnx * cnx + cny * cny + cnz * cnz;
+      // proposed normal: this vertex moved to (nx,ny,nz)
+      const pax = a === id ? nx : ax, pay = a === id ? ny : ay, paz = a === id ? nz : az;
+      const pbx = b === id ? nx : bx, pby = b === id ? ny : by, pbz = b === id ? nz : bz;
+      const pcx = c === id ? nx : cx, pcy = c === id ? ny : cy, pcz = c === id ? nz : cz;
+      ux = pbx - pax; uy = pby - pay; uz = pbz - paz;
+      vx = pcx - pax; vy = pcy - pay; vz = pcz - paz;
+      const pnx = uy * vz - uz * vy, pny = uz * vx - ux * vz, pnz = ux * vy - uy * vx;
+      const pl2 = pnx * pnx + pny * pny + pnz * pnz;
+      if (pl2 < 1e-20) return true;            // would collapse to zero area
+      if (cl2 < 1e-20) continue;               // already degenerate — can't judge
+      const dot = cnx * pnx + cny * pny + cnz * pnz;
+      if (dot < 0 || dot * dot < FOLD_COS * FOLD_COS * cl2 * pl2) return true;
+    }
+    return false;
+  };
+
   // ── Build CSR neighbour adjacency over unique vertices (multigraph) ───────
   const degree = new Uint32Array(nUnique);
   for (let t = 0; t < triCount; t++) {
@@ -178,9 +240,16 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
       const dx = sx * inv - curX[id];
       const dy = sy * inv - curY[id];
       const dz = sz * inv - curZ[id];
-      nxtX[id] = curX[id] + factor * dx;
-      nxtY[id] = curY[id] + factor * dy;
-      nxtZ[id] = curZ[id] + factor * dz;
+      const cx = curX[id] + factor * dx;
+      const cy = curY[id] + factor * dy;
+      const cz = curZ[id] + factor * dz;
+      // Skip the move if it would fold or collapse an incident triangle —
+      // leaves that vertex where it is rather than tearing the surface.
+      if (moveWouldFold(id, cx, cy, cz, curX, curY, curZ)) {
+        nxtX[id] = curX[id]; nxtY[id] = curY[id]; nxtZ[id] = curZ[id];
+      } else {
+        nxtX[id] = cx; nxtY[id] = cy; nxtZ[id] = cz;
+      }
     }
     const tx = curX, ty = curY, tz = curZ;
     curX = nxtX; curY = nxtY; curZ = nxtZ;
