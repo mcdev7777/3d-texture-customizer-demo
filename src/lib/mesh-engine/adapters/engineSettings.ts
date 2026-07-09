@@ -124,11 +124,26 @@ export function buildLayerSettings(region: PatternRegion, amplitude: number): En
  * then clamped to a triangle budget over the WHOLE mesh so N regions can't
  * multiply subdivision cost), decimation target, and bottom/repair knobs.
  */
+/** Max Taubin λ/μ iterations at smoothness 100. */
+const MAX_SMOOTHING_ITERATIONS = 14
+
+/**
+ * Map the user-facing Smoothness value (0–100) to Taubin λ/μ iteration count.
+ * 0 = off (crisp), 100 = softest. Each iteration is one λ/μ pair; Taubin
+ * converges fast and over-smoothing rounds off wanted relief detail (creases
+ * stay frozen regardless).
+ */
+export function smoothnessToIterations(value: number): number {
+  const v = Math.max(0, Math.min(100, value))
+  return Math.round((v / 100) * MAX_SMOOTHING_ITERATIONS)
+}
+
 export function buildPipelineSettings(
   regions: readonly PatternRegion[],
   quality: ExportQuality,
   bounds: EngineBounds,
   positions: Float32Array,
+  smoothness = 0,
 ): EngineSettings {
   const finestRawEdge = Math.min(...regions.map((r) => rawFineEdgeMm(quality, r, bounds)))
   const triBudget = Math.min(
@@ -178,5 +193,6 @@ export function buildPipelineSettings(
     regularizeEnabled: true,
     regularizeSecondPassMul: 1.1,
     boundaryFalloff: 0,
+    smoothingIterations: smoothnessToIterations(smoothness),
   }
 }

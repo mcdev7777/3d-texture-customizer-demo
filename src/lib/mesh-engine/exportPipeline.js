@@ -36,6 +36,7 @@ import { subdivide } from './subdivision.js';
 import { regularizeMesh } from './regularize.js';
 import { applyDisplacement } from './displacement.js';
 import { decimate } from './decimation.js';
+import { taubinSmooth } from './smoothing.js';
 import { resolveTJunctions, countEdgeDefects, countAreaSlivers } from './meshRepair.js';
 
 const yieldFrame = () => new Promise(r => setTimeout(r, 0));
@@ -316,6 +317,33 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
       // Free pre-decimation geometry — decimate created a separate copy.
       displaced.dispose();
       displaced = null;
+      if (shouldAbort()) return null;
+    }
+
+    // Taubin smoothing — softens hard facet ridges and step-edges left by
+    // heightmap displacement without deflating the model (crease/boundary
+    // vertices stay frozen). Runs BEFORE the bottom clamp/snap so the
+    // bed-contact plane it produces stays perfectly flat.
+    if (settings.smoothingIterations > 0) {
+      onEvent('smooth', 0);
+      await yieldFrame();
+      const smoothed = taubinSmooth(
+        finalGeometry,
+        settings.smoothingIterations,
+        // Freeze only genuinely hard edges (~55°+) — the base model's real
+        // corners — so moderate relief transitions still soften. The
+        // heightmap blur is what prevents hard displacement steps from forming
+        // in the first place; this lets the mesh pass finish the job.
+        { sharpAngleDeg: 55 },
+        (p) => onEvent('smooth', p),
+      );
+      if (smoothed !== finalGeometry) {
+        // finalGeometry may alias `displaced` (no decimation) — null the alias
+        // before disposing so the finally block can't double-dispose.
+        if (displaced === finalGeometry) displaced = null;
+        finalGeometry.dispose();
+        finalGeometry = smoothed;
+      }
       if (shouldAbort()) return null;
     }
 

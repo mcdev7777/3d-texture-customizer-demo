@@ -26,6 +26,8 @@ export function ExportModelPanel() {
   const exportProgress = useBakeStore((s) => s.exportProgress)
   const exportQuality = useBakeStore((s) => s.exportQuality)
   const setExportQuality = useBakeStore((s) => s.setExportQuality)
+  const exportSmoothness = useBakeStore((s) => s.exportSmoothness)
+  const setExportSmoothness = useBakeStore((s) => s.setExportSmoothness)
   const exportModel = useBakeStore((s) => s.exportModel)
 
   const hasPatterns = useBakeStore((s) => s.committedSurfaceIds.length > 0)
@@ -65,6 +67,26 @@ export function ExportModelPanel() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="mb-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">Surface smoothness</span>
+          <span className="text-[10px] text-purple-300 tabular-nums">{exportSmoothness}</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={exportSmoothness}
+          disabled={isApplying}
+          onChange={(e) => setExportSmoothness(Number(e.target.value))}
+          className="mt-1.5 w-full accent-purple-500 disabled:opacity-50"
+        />
+        <p className="mt-1 text-[10px] text-slate-500 leading-tight">
+          Softens hard edges and facets on the exported print. Sharp corners stay crisp.
+        </p>
       </div>
 
       {exportActive && exportProgress && (

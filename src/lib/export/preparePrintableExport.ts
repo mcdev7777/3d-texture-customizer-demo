@@ -23,6 +23,7 @@ export interface PrintableExportOptions {
   committedSurfaceIds: readonly string[]
   quality: ExportQuality
   exportUnitScale: number
+  smoothnessLevel?: number
   onProgress?: ExportProgressCallback
 }
 
@@ -76,7 +77,7 @@ export async function preparePrintableExport(
   root: Object3D,
   options: PrintableExportOptions,
 ): Promise<Group> {
-  const { placements, committedSurfaceIds, quality, exportUnitScale, onProgress } = options
+  const { placements, committedSurfaceIds, quality, exportUnitScale, smoothnessLevel = 0, onProgress } = options
   const appliedPatternCount = committedSurfaceIds.length
   const sourceTriangleCount = countSourceTriangles(root)
 
@@ -124,6 +125,8 @@ export async function preparePrintableExport(
         1,
       ),
       isStale,
+      [],
+      smoothnessLevel,
     )
 
     if (!result || isStale()) {

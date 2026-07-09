@@ -42,6 +42,7 @@ export function Pattern3DPreviewOverlay() {
   const exportUnitScale = loadedModel?.exportUnitScale ?? 1
   const placements = usePatternStore((s) => s.placements)
   const committedSurfaceIds = useBakeStore((s) => s.committedSurfaceIds)
+  const exportSmoothness = useBakeStore((s) => s.exportSmoothness)
   const show3DPreview = useBakeStore((s) => s.show3DPreview)
   const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
 
@@ -156,6 +157,7 @@ export function Pattern3DPreviewOverlay() {
           undefined,
           undefined,
           meshPreviewIds,
+          exportSmoothness,
         )
         if (cancelled) {
           revertPartialHides(modelObject, nextHidden, nextHiddenPreview)
@@ -232,6 +234,7 @@ export function Pattern3DPreviewOverlay() {
     scene,
     placements,
     exportUnitScale,
+    exportSmoothness,
   ])
 
   useEffect(() => {

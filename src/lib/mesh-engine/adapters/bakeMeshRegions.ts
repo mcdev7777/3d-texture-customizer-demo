@@ -67,6 +67,7 @@ export async function bakeMeshRegions(
   onEvent?: PipelineEventHandler,
   isStale?: () => boolean,
   previewSurfaceIds: readonly string[] = [],
+  smoothnessLevel = 0,
 ): Promise<BakeMeshRegionsResult | null> {
   const regions = collectAllExportRegionsForMesh(
     mesh,
@@ -91,7 +92,12 @@ export async function bakeMeshRegions(
   // of every committed surface being stamped with a single "primary"
   // (largest) region's pattern — see engineSettings.ts buildLayerSettings.
   const layers: EngineLayer[] = patternedRegions.map((region) => {
-    const texture = buildDisplacementTexture(region.settings.patternId!, region.settings, quality)
+    const texture = buildDisplacementTexture(
+      region.settings.patternId!,
+      region.settings,
+      quality,
+      smoothnessLevel,
+    )
     // depthLevelToDisplacementWorld(depth, mm-per-unit) = depthMm / mm-per-unit,
     // so with mmPerPositionUnit=1 (export) this reduces to depthMm exactly.
     const amplitude = depthLevelToDisplacementWorld(region.settings.depth, mmPerPositionUnit)
@@ -110,7 +116,7 @@ export async function bakeMeshRegions(
   const committedTris = collectCommittedTriangles(patternedRegions.map((r) => r.triangleIndices))
   const faceWeights = buildFaceWeights(triangleCount, committedTris)
   const bounds = computeEngineBounds(positions)
-  const settings = buildPipelineSettings(patternedRegions, quality, bounds, positions)
+  const settings = buildPipelineSettings(patternedRegions, quality, bounds, positions, smoothnessLevel)
 
   const result = await runMeshPipeline(
     {
