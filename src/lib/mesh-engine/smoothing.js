@@ -25,7 +25,8 @@
  * @param {object}              [opts]
  * @param {number}              [opts.lambda=0.5]        positive smoothing factor
  * @param {number}              [opts.mu=-0.53]          negative inflation factor (|mu| slightly > lambda)
- * @param {number}              [opts.sharpAngleDeg=35]  dihedral above which an edge freezes its endpoints
+ * @param {number}              [opts.sharpAngleDeg=35]  dihedral above which an edge counts as a crease
+ * @param {boolean}             [opts.freezeCreases=true] freeze crease vertices (preserve hard edges); false rounds them into soft fillets
  * @param {function}            [onProgress]             callback(fraction 0–1)
  * @returns {THREE.BufferGeometry} new non-indexed geometry with per-face normals recomputed
  */
@@ -43,6 +44,13 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
   const lambda = opts.lambda ?? 0.5;
   const mu = opts.mu ?? -0.53;
   const sharpCos = Math.cos((opts.sharpAngleDeg ?? 35) * Math.PI / 180);
+  // When false, manifold crease edges (>sharpAngle dihedral) are NOT frozen —
+  // the general 3D Taubin pass is allowed to round them, softening curved
+  // feature edges (circular hole rims) into fillets. Boundary/non-manifold
+  // edges are always frozen regardless (they have no opposing face to average
+  // against, and moving them opens the mesh). The fold-rejection guard bounds
+  // how far any single edge can round per step, so hard corners still resist.
+  const freezeCreases = opts.freezeCreases ?? true;
 
   const pa = geometry.attributes.position.array;
   const cornerCount = pa.length / 3;
@@ -142,7 +150,7 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
         secondFaceSeen[id] = 1;
         const dot = fnX[f0] * fnX[t] + fnY[f0] * fnY[t] + fnZ[f0] * fnZ[t];
         if (dot < sharpCos) {
-          frozen[lo] = 1; frozen[hi] = 1;
+          if (freezeCreases) { frozen[lo] = 1; frozen[hi] = 1; }
           addCreaseNeighbour(lo, hi); addCreaseNeighbour(hi, lo);
         }
       }
@@ -260,7 +268,13 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
         // direction, rounding the loop out without moving the feature off
         // the surface it's frozen to. Junctions (creaseA === -2) or loop
         // endpoints stay fully static.
-        if (creaseA[id] >= 0 && creaseB[id] >= 0) {
+        // Only relax on the POSITIVE (λ) pass. The Taubin μ (negative) pass
+        // exists to cancel volumetric shrinkage of the 2D surface smoothing —
+        // but on a 1D crease LOOP a negative-Laplacian step re-amplifies the
+        // high-frequency radial spikes it's trying to remove (that's how Taubin
+        // preserves detail). A circular rim should simply round toward a
+        // smooth circle, so we run pure Laplacian here: skip the μ pass.
+        if (factor > 0 && creaseA[id] >= 0 && creaseB[id] >= 0) {
           const na = creaseA[id], nb = creaseB[id];
           const mx = (curX[na] + curX[nb]) / 2;
           const my = (curY[na] + curY[nb]) / 2;

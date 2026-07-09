@@ -330,11 +330,15 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
       const smoothed = taubinSmooth(
         finalGeometry,
         settings.smoothingIterations,
-        // Freeze only genuinely hard edges (~55°+) — the base model's real
-        // corners — so moderate relief transitions still soften. The
-        // heightmap blur is what prevents hard displacement steps from forming
-        // in the first place; this lets the mesh pass finish the job.
-        { sharpAngleDeg: 55 },
+        // freezeCreases:false lets the 3D pass ROUND manifold feature edges —
+        // notably curved ones like circular hole rims — into soft fillets
+        // instead of preserving them hard (the "curved edges aren't soft"
+        // complaint). Boundary/non-manifold edges are still frozen (they'd
+        // open the mesh), and the fold-rejection guard bounds per-step
+        // rounding, so watertightness holds (verified by scripts/verify-export.mjs)
+        // and genuinely hard corners resist at low smoothness. The smoothness
+        // slider governs how far edges round.
+        { sharpAngleDeg: 55, freezeCreases: false },
         (p) => onEvent('smooth', p),
       );
       if (smoothed !== finalGeometry) {
