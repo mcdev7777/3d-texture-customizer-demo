@@ -33,7 +33,15 @@ export function getConnectedCoplanarSurface(
   }
 
   const cosThreshold = Math.cos((angleToleranceDeg * Math.PI) / 180)
-  const baseNormal = computeFaceNormal(geometry, seedFaceIndex, mesh, new Vector3())
+
+  // Chained (local) tolerance: compare each candidate face to its immediate
+  // predecessor's normal rather than a single fixed seed normal. This lets
+  // the flood-fill follow smoothly curving surfaces (e.g. all the way around
+  // a cylindrical barrel) as one continuous region, while still stopping at
+  // genuine sharp edges (e.g. where a wall meets a flat cap), since the
+  // normal delta between any two adjacent faces is still checked.
+  const faceNormals: Vector3[] = new Array(triangleCount)
+  faceNormals[seedFaceIndex] = computeFaceNormal(geometry, seedFaceIndex, mesh, new Vector3())
 
   const visited = new Uint8Array(triangleCount)
   const result: number[] = []
@@ -43,6 +51,7 @@ export function getConnectedCoplanarSurface(
   while (queue.length > 0 && result.length < maxTriangles) {
     const face = queue.pop()!
     result.push(face)
+    const baseNormal = faceNormals[face]
 
     for (const neighbor of neighbors[face]) {
       if (visited[neighbor]) continue
@@ -50,6 +59,7 @@ export function getConnectedCoplanarSurface(
         continue
       }
       visited[neighbor] = 1
+      faceNormals[neighbor] = computeFaceNormal(geometry, neighbor, mesh, new Vector3())
       queue.push(neighbor)
     }
   }
