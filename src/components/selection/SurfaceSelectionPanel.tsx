@@ -91,8 +91,6 @@ function StatRow({ label, value }: { label: string; value: string | number }) {
 
 export function SurfaceSelectionPanel() {
   const hasModel = useAppStore((s) => !!s.loadedModel)
-  const enabled = useSurfaceSelectionStore((s) => s.enabled)
-  const setEnabled = useSurfaceSelectionStore((s) => s.setEnabled)
   const selectionMode = useSurfaceSelectionStore((s) => s.selectionMode)
   const setSelectionMode = useSurfaceSelectionStore((s) => s.setSelectionMode)
   const angleTolerance = useSurfaceSelectionStore((s) => s.angleTolerance)
@@ -116,13 +114,6 @@ export function SurfaceSelectionPanel() {
 
   return (
     <Panel title="Selection" id="selection-panel">
-      <ToggleRow
-        label="Enable selection"
-        checked={enabled}
-        onChange={setEnabled}
-        disabled={!hasModel}
-      />
-
       <div className="mt-3 grid grid-cols-2 gap-2">
         {modes.map((m) => (
           <button
@@ -173,7 +164,7 @@ export function SurfaceSelectionPanel() {
             disabled={!hasModel}
           />
 
-          {enabled && hasModel && (
+          {hasModel && (
             <p className="text-[11px] text-slate-400">
               {hasSeed
                 ? 'Angle selection active — drag the threshold to grow or shrink the region.'
@@ -192,7 +183,7 @@ export function SurfaceSelectionPanel() {
         >
           Clear selection
         </Button>
-        {enabled && hasModel && (
+        {hasModel && (
           <p className="text-[10px] text-slate-500 mt-2">
             Shift+click adds to selection · Right-click clears
           </p>
@@ -267,11 +258,9 @@ export function SurfaceSelectionPanel() {
           <p className="text-xs text-slate-500">
             {!hasModel
               ? 'Load a model to begin.'
-              : !enabled
-                ? 'Enable selection to pick a surface or part.'
-                : isSurfaceMode
-                  ? 'Click a surface to start angle selection. Shift+click to add more.'
-                  : 'Click a part to select the whole mesh. Shift+click to add more.'}
+              : isSurfaceMode
+                ? 'Click a surface to start angle selection. Shift+click to add more.'
+                : 'Click a part to select the whole mesh. Shift+click to add more.'}
           </p>
         )}
       </div>

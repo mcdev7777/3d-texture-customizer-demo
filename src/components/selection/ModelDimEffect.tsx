@@ -8,9 +8,8 @@ const DIM_OPACITY = 0.35
 export function ModelDimEffect() {
   const loadedModel = useAppStore((s) => s.loadedModel)
   const selectedSurfaces = useSurfaceSelectionStore((s) => s.selectedSurfaces)
-  const enabled = useSurfaceSelectionStore((s) => s.enabled)
 
-  const shouldDim = enabled && selectedSurfaces.length > 0
+  const shouldDim = selectedSurfaces.length > 0
   const selectedMeshUuids = new Set(selectedSurfaces.map((surface) => surface.meshUuid))
 
   useEffect(() => {

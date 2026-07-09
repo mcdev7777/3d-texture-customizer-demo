@@ -33,7 +33,6 @@ interface BuildOptions {
 }
 
 interface SurfaceSelectionState {
-  enabled: boolean
   angleTolerance: number
   selectionMode: SelectionMode
   connectedOnly: boolean
@@ -46,7 +45,6 @@ interface SurfaceSelectionState {
   lastPick: LastPick | null
   modelRoot: Object3D | null
 
-  setEnabled: (enabled: boolean) => void
   setAngleTolerance: (degrees: number) => void
   setSelectionMode: (mode: SelectionMode) => void
   setConnectedOnly: (connectedOnly: boolean) => void
@@ -222,7 +220,6 @@ function recomputeAllSelections(state: SurfaceSelectionState): ReturnType<typeof
 }
 
 export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get) => ({
-  enabled: false,
   angleTolerance: DEFAULT_ANGLE_TOLERANCE,
   selectionMode: 'surface',
   connectedOnly: true,
@@ -232,8 +229,6 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
   selectionSeeds: {},
   lastPick: null,
   modelRoot: null,
-
-  setEnabled: (enabled) => set({ enabled }),
 
   setAngleTolerance: (degrees) => {
     const clamped = Math.min(MAX_ANGLE_TOLERANCE, Math.max(MIN_ANGLE_TOLERANCE, degrees))
@@ -322,7 +317,6 @@ export const useSurfaceSelectionStore = create<SurfaceSelectionState>((set, get)
     const { selectedSurfaces } = get()
     disposeHighlights(selectedSurfaces)
     set({
-      enabled: false,
       angleTolerance: DEFAULT_ANGLE_TOLERANCE,
       selectionMode: 'surface',
       connectedOnly: true,
