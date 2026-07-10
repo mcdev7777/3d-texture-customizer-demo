@@ -26,6 +26,7 @@ import { computePatternBounds, type PatternBounds } from './patternBounds'
 
 const MAPPING_PLANAR = 0
 const MAPPING_CUBIC = 1
+const MAPPING_CYLINDRICAL = 2
 
 type PatternUniformBag = Record<string, { value: unknown }>
 
@@ -63,6 +64,13 @@ uniform int patternEngraveMode;
 uniform int patternMappingMode;
 uniform vec3 patternBoundsMin;
 uniform vec3 patternBoundsSize;
+uniform vec3 patternCylCenter;
+uniform vec3 patternCylAxis;
+uniform vec3 patternCylRight;
+uniform vec3 patternCylUp;
+uniform float patternCylRadius;
+
+const float PATTERN_TWO_PI = 6.28318530718;
 
 varying vec3 vPatternWorldPos;
 
@@ -144,7 +152,24 @@ float patternHeightCubic(vec3 pos, vec3 projN) {
   return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
 }
 
+// Cylindrical side projection: go-around angle → U, along-axis height → V, both
+// scaled by circumference so a tile stays square (no grazing-angle stretch).
+float patternHeightCylindrical(vec3 pos) {
+  vec3 d = pos - patternCylCenter;
+  float h = dot(d, patternCylAxis);
+  float rx = dot(d, patternCylRight);
+  float ry = dot(d, patternCylUp);
+  float theta = atan(ry, rx);
+  float circumference = max(PATTERN_TWO_PI * patternCylRadius, 1e-4);
+  float uRaw = theta / PATTERN_TWO_PI + 0.5;
+  float vRaw = h / circumference;
+  float pu = uRaw / patternRepeatScale;
+  float pv = vRaw / patternRepeatScaleV;
+  return patternSampleMap(vec2(pu, pv));
+}
+
 float patternHeightAt(vec3 pos, vec3 projN) {
+  if (patternMappingMode == 2) return patternHeightCylindrical(pos);
   if (patternMappingMode == 1) return patternHeightCubic(pos, projN);
   return patternHeightPlanar(pos);
 }
@@ -190,6 +215,13 @@ export interface PatternMaterialOptions {
   patternTexture?: Texture
   mappingMode: SelectionMode
   bounds?: PatternBounds
+  cylinder?: {
+    axis: Vector3
+    center: Vector3
+    right: Vector3
+    up: Vector3
+    radius: number
+  }
 }
 
 function isStandardCompatibleMaterial(
@@ -255,9 +287,20 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
     patternAmplitude: { value: amplitude },
     patternInvert: { value: settings.invert ? 1 : 0 },
     patternEngraveMode: { value: settings.mode === 'engrave' ? 1 : 0 },
-    patternMappingMode: { value: mappingMode === 'part' ? MAPPING_CUBIC : MAPPING_PLANAR },
+    patternMappingMode: {
+      value: options.cylinder
+        ? MAPPING_CYLINDRICAL
+        : mappingMode === 'part'
+          ? MAPPING_CUBIC
+          : MAPPING_PLANAR,
+    },
     patternBoundsMin: { value: b.min.clone() },
     patternBoundsSize: { value: b.size.clone() },
+    patternCylCenter: { value: options.cylinder?.center.clone() ?? new Vector3() },
+    patternCylAxis: { value: options.cylinder?.axis.clone() ?? new Vector3(0, 0, 1) },
+    patternCylRight: { value: options.cylinder?.right.clone() ?? new Vector3(1, 0, 0) },
+    patternCylUp: { value: options.cylinder?.up.clone() ?? new Vector3(0, 1, 0) },
+    patternCylRadius: { value: options.cylinder?.radius ?? 1 },
   }
 }
 
@@ -390,6 +433,7 @@ export function buildPatternMaterialOptions(
     mappingMode?: SelectionMode
     cubicBoundsTriangles?: readonly number[]
     sharedBoundsWorld?: { min: Vector3; max: Vector3 }
+    cylinder?: { axis: Vector3; center: Vector3; right: Vector3; up: Vector3; radius: number }
   },
   baseMaterial: Material,
 ): PatternMaterialOptions {
@@ -421,6 +465,7 @@ export function buildPatternMaterialOptions(
     modelRoot,
     mappingMode,
     bounds,
+    cylinder: region.cylinder,
   }
 }
 

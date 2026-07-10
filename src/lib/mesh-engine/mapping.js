@@ -137,18 +137,37 @@ export function computeUV(pos, normal, mode, settings, bounds) {
     case MODE_CYLINDRICAL: {
       // mappingBlend=0 → pure side projection for all faces (original behaviour, no cap seam).
       // mappingBlend>0 → smooth side↔cap blend.
-      // Cylinder axis is +Z. Center XY and radius default to the AABB but can
-      // be overridden so partial cylinders (pie slices) project undistorted.
-      const cx = settings.cylinderCenterX ?? center.x;
-      const cy = settings.cylinderCenterY ?? center.y;
+      // The cylinder frame can be given explicitly (arbitrary axis, from an
+      // auto-fit) via cylAxis/cylRight/cylUp/cylCenter; otherwise it defaults to
+      // the legacy +Z axis with the AABB center. `theta` is the go-around angle
+      // (in the right/up plane) and the height runs along the axis — both scaled
+      // by the circumference so a tile stays square (no grazing-angle stretch).
+      const hasFrame = !!settings.cylAxis;
       const r  = Math.max(settings.cylinderRadius ?? Math.max(size.x, size.y) * 0.5, 1e-6);
       const C  = TWO_PI * r;
-      const rx = pos.x - cx;
-      const ry = pos.y - cy;
       const blend = settings.mappingBlend ?? 0.0;
-      const theta = Math.atan2(ry, rx);
-      const uRaw = (theta / TWO_PI) + 0.5;
-      const vSide = (pos.z - min.z) / C;
+
+      let rx, ry, theta, uRaw, vSide, absAxisComponent;
+      if (hasFrame) {
+        const ax = settings.cylAxis, rt = settings.cylRight, upv = settings.cylUp, ct = settings.cylCenter;
+        const dx = pos.x - ct.x, dy = pos.y - ct.y, dz = pos.z - ct.z;
+        const h = dx * ax.x + dy * ax.y + dz * ax.z;               // along axis
+        rx = dx * rt.x + dy * rt.y + dz * rt.z;                     // right component
+        ry = dx * upv.x + dy * upv.y + dz * upv.z;                  // up component
+        theta = Math.atan2(ry, rx);
+        uRaw = (theta / TWO_PI) + 0.5;
+        vSide = h / C;
+        absAxisComponent = Math.abs(normal.x * ax.x + normal.y * ax.y + normal.z * ax.z);
+      } else {
+        const cx = settings.cylinderCenterX ?? center.x;
+        const cy = settings.cylinderCenterY ?? center.y;
+        rx = pos.x - cx;
+        ry = pos.y - cy;
+        theta = Math.atan2(ry, rx);
+        uRaw = (theta / TWO_PI) + 0.5;
+        vSide = (pos.z - min.z) / C;
+        absAxisComponent = Math.abs(normal.z);
+      }
 
       // Seam smoothing: cross-fade between left-side and right-side texture
       // continuations at the atan2 wrap. Both sides use smoothly varying UVs
@@ -180,8 +199,7 @@ export function computeUV(pos, normal, mode, settings, bounds) {
 
       const capThreshold = Math.cos((settings.capAngle ?? 20) * Math.PI / 180);
       const blendHalf = (settings.seamBandWidth ?? 0.5) * 0.5;
-      const absnz = Math.abs(normal.z);
-      const capW = Math.max(0, Math.min(1, (absnz - (capThreshold - blendHalf)) / (2 * blendHalf + 1e-6)));
+      const capW = Math.max(0, Math.min(1, (absAxisComponent - (capThreshold - blendHalf)) / (2 * blendHalf + 1e-6)));
 
       if (capW <= 0) {
         if (sideSamples.length === 1 && sideSamples[0].w === 1) return sideSamples[0];

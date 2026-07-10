@@ -104,7 +104,7 @@ export async function bakeMeshRegions(
       imageData: texture.imageData,
       imgWidth: texture.width,
       imgHeight: texture.height,
-      settings: buildLayerSettings(region, amplitude),
+      settings: buildLayerSettings(region, amplitude, soupScale),
       bounds: region.sharedBoundsWorld
         ? sharedBoundsToEngineBounds(region.sharedBoundsWorld.min, region.sharedBoundsWorld.max, soupScale)
         : undefined,

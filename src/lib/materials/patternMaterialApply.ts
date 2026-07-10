@@ -24,6 +24,7 @@ import {
 } from '../geometry/bakeReliefDisplacement'
 import { splitVerticesAlongPatchBoundary, splitVerticesAlongSharpEdges } from '../geometry/splitSharpEdges'
 import { buildSurfaceIslands } from '../geometry/surfaceIslands'
+import { detectCylinder, type CylinderFit } from '../geometry/detectCylinder'
 import { getConnectedCoplanarSurface } from '../surface/getConnectedCoplanarSurface'
 import { getFacesByAngle } from '../surface/selectByAngle'
 import { mapLiveFaceIndexToPristine } from '../surface/mapFaceToPristine'
@@ -68,6 +69,14 @@ export interface PatternRegion {
    * as one continuous treatment instead of a separate pattern per part.
    */
   sharedBoundsWorld?: { min: Vector3; max: Vector3 }
+  /**
+   * World-space cylinder fit for the region's triangles, when they form a
+   * cylindrical band. Present → the pattern is mapped with cylindrical
+   * projection (go-around angle + along-axis height) instead of cubic/planar,
+   * so it wraps a curved wall without the grazing-angle stretching that box
+   * projection produces. Null/absent → non-cylindrical, use the default mapping.
+   */
+  cylinder?: CylinderFit
 }
 
 interface MeshPatternState {
@@ -237,6 +246,9 @@ function expandRegionsForExport(
         selectionType: 'surface',
         mappingMode: 'part',
         cubicBoundsTriangles: region.triangleIndices,
+        // Prefer the parent region's whole-selection cylinder fit (so all
+        // islands share one consistent wrap); recompute per-island if absent.
+        cylinder: region.cylinder ?? computeRegionCylinder(mesh, state, island.faceIds),
       })
     }
   }
@@ -477,6 +489,7 @@ export function collectAllExportRegionsForMesh(
         sharedBoundsWorld: region.sharedBoundsWorld
           ? { min: region.sharedBoundsWorld.min.clone(), max: region.sharedBoundsWorld.max.clone() }
           : undefined,
+        cylinder: region.cylinder,
       })
       seen.add(baseId)
     }
@@ -633,6 +646,20 @@ function resolveTriangleIndices(
     : getFacesByAngle(geo, mesh, pristineFace, angleTolerance)
 }
 
+/**
+ * Fit a cylinder to a region's triangles (in world space) so a curved wall can
+ * be mapped with cylindrical projection instead of stretched box projection.
+ * Returns undefined for non-cylindrical (flat/box-like) selections.
+ */
+function computeRegionCylinder(
+  mesh: Mesh,
+  state: MeshPatternState,
+  triangleIndices: readonly number[],
+): CylinderFit | undefined {
+  mesh.updateWorldMatrix(true, false)
+  return detectCylinder(state.pristineGeometry, mesh.matrixWorld, triangleIndices) ?? undefined
+}
+
 function buildRegion(
   mesh: Mesh,
   selectedSurface: SelectedSurface,
@@ -640,14 +667,16 @@ function buildRegion(
   surfaceId: string,
 ): PatternRegion {
   const state = ensureMeshState(mesh)
+  const triangleIndices = resolveTriangleIndices(mesh, state, selectedSurface)
   return {
     surfaceId,
-    triangleIndices: resolveTriangleIndices(mesh, state, selectedSurface),
+    triangleIndices,
     settings: { ...settings },
     normal: selectedSurface.normal.clone(),
     anchor: selectedSurface.point.clone(),
     selectionType: selectedSurface.selectionType,
     mappingMode: selectedSurface.selectionType,
+    cylinder: computeRegionCylinder(mesh, state, triangleIndices),
   }
 }
 
@@ -718,9 +747,10 @@ export function syncMeshPreviewPatterns(
     const primary =
       previews.find((p) => p.surface.surfaceId === mergeOptions.primarySurfaceId) ?? previews[0]!
 
+    const mergedPreviewTriangles = [...triangleSet]
     const region: PatternRegion = {
       surfaceId: previewRegionId(mergeOptions.primarySurfaceId),
-      triangleIndices: [...triangleSet],
+      triangleIndices: mergedPreviewTriangles,
       settings: { ...primary.settings },
       normal: primary.surface.normal.clone(),
       anchor: primary.surface.point.clone(),
@@ -729,6 +759,9 @@ export function syncMeshPreviewPatterns(
       sharedBoundsWorld: mergeOptions.sharedBoundsWorld
         ? { min: mergeOptions.sharedBoundsWorld.min.clone(), max: mergeOptions.sharedBoundsWorld.max.clone() }
         : undefined,
+      cylinder: mergeOptions.sharedBoundsWorld
+        ? undefined
+        : computeRegionCylinder(mesh, state, mergedPreviewTriangles),
     }
 
     state.regions = [...committed, region]
@@ -851,9 +884,10 @@ export function commitMergedPatternMaterial(
   const primary =
     selectedSurfaces.find((s) => s.surfaceId === primarySurfaceId) ?? selectedSurfaces[0]!
 
+  const mergedTriangles = [...triangleSet]
   const region: PatternRegion = {
     surfaceId: primarySurfaceId,
-    triangleIndices: [...triangleSet],
+    triangleIndices: mergedTriangles,
     settings: { ...settings },
     normal: primary.normal.clone(),
     anchor: primary.point.clone(),
@@ -862,6 +896,9 @@ export function commitMergedPatternMaterial(
     sharedBoundsWorld: sharedBoundsWorld
       ? { min: sharedBoundsWorld.min.clone(), max: sharedBoundsWorld.max.clone() }
       : undefined,
+    // Only auto-cylindrical for a single-mesh merge; a cross-mesh merge shares
+    // one flat/box frame (sharedBoundsWorld) and isn't a single cylinder.
+    cylinder: sharedBoundsWorld ? undefined : computeRegionCylinder(mesh, state, mergedTriangles),
   }
 
   const mergedIds = new Set(selectedSurfaces.map((s) => s.surfaceId))

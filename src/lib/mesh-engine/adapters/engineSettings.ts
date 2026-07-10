@@ -17,8 +17,13 @@ import { clampEdgeToTriangleBudget } from './subdivisionEstimate'
 export const MODE_CUBIC = 6
 /** BumpMesh mapping.js MODE_TRIPLANAR */
 export const MODE_TRIPLANAR = 5
+/** BumpMesh mapping.js MODE_CYLINDRICAL */
+export const MODE_CYLINDRICAL = 3
 
 export function mapSelectionToMappingMode(region: PatternRegion): number {
+  // A region that fits a cylinder wraps with cylindrical projection so the
+  // pattern doesn't stretch at grazing/seam angles the way box projection does.
+  if (region.cylinder) return MODE_CYLINDRICAL
   const mode = region.mappingMode ?? region.selectionType
   return mode === 'part' ? MODE_CUBIC : MODE_TRIPLANAR
 }
@@ -83,8 +88,13 @@ function rawFineEdgeMm(quality: ExportQuality, region: PatternRegion, bounds: En
  * `depthLevelToDisplacementMm` (export) or `depthLevelToDisplacementWorld`
  * (viewer space) before calling this.
  */
-export function buildLayerSettings(region: PatternRegion, amplitude: number): EngineLayerSettings {
+export function buildLayerSettings(
+  region: PatternRegion,
+  amplitude: number,
+  soupScale = 1,
+): EngineLayerSettings {
   const settings = region.settings
+  const cyl = region.cylinder
 
   // "Scale" is a tile-size multiplier: scale 1 = one tile fills the
   // selection; scale 0.5 = each tile is half-size, so a 2x2 = 4 tiles fill
@@ -118,9 +128,27 @@ export function buildLayerSettings(region: PatternRegion, amplitude: number): En
     // (fillets, rounded transitions — "part" selections use MODE_CUBIC) it
     // produces visible seams where the dominant axis flips and stretching as
     // the projection approaches grazing angle right up to that hard cut.
-    mappingBlend: 1,
+    // Cylindrical wraps a wall with pure side projection (no cap seam), so its
+    // blend is 0; cubic/triplanar keep the soft seam blend.
+    mappingBlend: cyl ? 0 : 1,
     seamBandWidth: 0.5,
     blendNormalSmoothing: 32,
+    // Cylinder frame in the pipeline's position space (world × soupScale). The
+    // axis/right/up are directions (scale-invariant); center and radius are
+    // lengths, so they scale with the soup.
+    ...(cyl
+      ? {
+          cylAxis: { x: cyl.axis.x, y: cyl.axis.y, z: cyl.axis.z },
+          cylRight: { x: cyl.right.x, y: cyl.right.y, z: cyl.right.z },
+          cylUp: { x: cyl.up.x, y: cyl.up.y, z: cyl.up.z },
+          cylCenter: {
+            x: cyl.center.x * soupScale,
+            y: cyl.center.y * soupScale,
+            z: cyl.center.z * soupScale,
+          },
+          cylinderRadius: cyl.radius * soupScale,
+        }
+      : {}),
   }
 }
 

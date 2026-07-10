@@ -56,6 +56,12 @@ export interface EngineLayerSettings {
   mappingBlend: number
   seamBandWidth: number
   blendNormalSmoothing: number
+  /** Cylindrical mapping frame (world × soupScale space); present when mappingMode is cylindrical. */
+  cylAxis?: { x: number; y: number; z: number }
+  cylRight?: { x: number; y: number; z: number }
+  cylUp?: { x: number; y: number; z: number }
+  cylCenter?: { x: number; y: number; z: number }
+  cylinderRadius?: number
 }
 
 export interface EngineLayer {
