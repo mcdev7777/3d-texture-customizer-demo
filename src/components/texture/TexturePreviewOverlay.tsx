@@ -91,12 +91,19 @@ export function TexturePreviewOverlay() {
     }
 
     const currentPlacements = usePatternStore.getState().placements
+    const committedSet = new Set(committedSurfaceIds)
     const previewsByMesh = new Map<string, { mesh: Mesh; items: MeshPreviewTarget[] }>()
     const touchedMeshes = new Set<Mesh>()
 
     for (const surface of selectedSurfaces) {
       const settings = currentPlacements[surface.surfaceId]?.settings
       if (!settings?.patternId) continue
+
+      // Already-committed surfaces are updated in place below, never previewed:
+      // a live preview region must not coexist with a committed region on the
+      // same surface, or both bake onto the same triangles (two patterns on one
+      // surface). Only surfaces not yet applied become live preview regions.
+      if (committedSet.has(surface.surfaceId)) continue
 
       const mesh = findMeshByUuid(modelObject, surface.meshUuid)
       if (!mesh) {
@@ -115,6 +122,31 @@ export function TexturePreviewOverlay() {
     }
 
     try {
+      // Changing a committed surface's pattern replaces its region in place —
+      // whether or not preview is active — so the new pattern swaps in for the
+      // old one instead of stacking on top of it.
+      for (const surface of selectedSurfaces) {
+        const settings = currentPlacements[surface.surfaceId]?.settings
+        if (!settings?.patternId) continue
+        if (!committedSet.has(surface.surfaceId)) continue
+
+        const mesh = findMeshByUuid(modelObject, surface.meshUuid)
+        if (!mesh) continue
+
+        const updated = updateCommittedRegionSettings(
+          mesh,
+          modelObject,
+          surface.surfaceId,
+          settings,
+        )
+        if (!updated) {
+          useBakeStore.setState({
+            status: 'error',
+            error: 'Could not update applied texture — try applying again.',
+          })
+        }
+      }
+
       if (previewActive) {
         const coherence = patternStore.patternCoherence
         const mergeActive = coherence === 'merged' && selectedSurfaces.length > 1
@@ -142,28 +174,6 @@ export function TexturePreviewOverlay() {
             syncMeshPreviewPatterns(mesh, modelObject, items, { primarySurfaceId, sharedBoundsWorld: sharedBounds })
           } else {
             syncMeshPreviewPatterns(mesh, modelObject, items)
-          }
-        }
-      } else {
-        for (const surface of selectedSurfaces) {
-          const settings = currentPlacements[surface.surfaceId]?.settings
-          if (!settings?.patternId) continue
-          if (!committedSurfaceIds.includes(surface.surfaceId)) continue
-
-          const mesh = findMeshByUuid(modelObject, surface.meshUuid)
-          if (!mesh) continue
-
-          const updated = updateCommittedRegionSettings(
-            mesh,
-            modelObject,
-            surface.surfaceId,
-            settings,
-          )
-          if (!updated) {
-            useBakeStore.setState({
-              status: 'error',
-              error: 'Could not update applied texture — try applying again.',
-            })
           }
         }
       }
