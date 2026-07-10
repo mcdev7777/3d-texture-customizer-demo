@@ -6,28 +6,34 @@ import { getPatternImageData } from '../../../utils/patternTextures'
 import { evaluatePattern } from '../../textures/patternEvaluators'
 import { shapeHeightSample } from '../../textures/heightMapSampler'
 
-function raisedFromHeight(raw: number, settings: SurfacePatternSettings): number {
-  let h = shapeHeightSample(raw, {
+/**
+ * The pattern's ink intensity (black = 1) as a [0,1] grey value, respecting
+ * invert. This is the raw feature amount; the emboss/engrave direction is NOT
+ * baked in here — it is applied as the sign of the layer amplitude (positive =
+ * emboss/outward, negative = engrave/inward). White (ink 0) always stays flat.
+ */
+function inkFromHeight(raw: number, settings: SurfacePatternSettings): number {
+  const h = shapeHeightSample(raw, {
     invert: settings.invert ?? false,
     smoothing: settings.smoothing ?? 0,
   })
-  const ink = settings.invert ? h : 1 - h
-  return settings.mode === 'engrave' ? 1 - ink : ink
+  return settings.invert ? h : 1 - h
 }
 
 /**
- * Encode relief as BumpMesh greyscale. The pipeline's default (non-symmetric)
- * displacement is `disp = grey * amplitude`, i.e. grey 0 = no displacement and
- * grey 1 = full height — so `raised` maps straight to grey. This keeps flat
- * (raised = 0) tones at exactly 0mm and raised (raised = 1) tones at the full
- * depth, matching the emboss/engrave intent: in emboss, ink/black rises to
- * `depth` and white stays at 0; in engrave the roles swap.
+ * Encode the ink intensity as BumpMesh greyscale. The pipeline's default
+ * (non-symmetric) displacement is `disp = grey * amplitude`, i.e. grey 0 = no
+ * displacement and grey 1 = full amplitude — so ink maps straight to grey.
+ * White (ink 0) stays at exactly 0mm; full ink reaches the full amplitude. The
+ * emboss/engrave direction is the SIGN of that amplitude (see buildLayerSettings
+ * / bakeMeshRegions): emboss = +amplitude (ink rises outward), engrave =
+ * −amplitude (ink carves inward), both leaving white flat.
  *
- * In symmetric mode the pipeline re-centers this (`grey - 0.5`) so raised tones
- * push outward and flat tones push inward equally.
+ * In symmetric mode the pipeline re-centers this (`grey - 0.5`) so ink tones
+ * push one way and flat tones push the other equally.
  */
-function encodeBumpMeshGrey(raised: number): number {
-  return Math.round(Math.min(1, Math.max(0, raised)) * 255)
+function encodeBumpMeshGrey(ink: number): number {
+  return Math.round(Math.min(1, Math.max(0, ink)) * 255)
 }
 
 function rasterizeProcedural(
@@ -41,8 +47,8 @@ function rasterizeProcedural(
       const u = (x + 0.5) / size
       const v = (y + 0.5) / size
       const raw = evaluatePattern(patternId, u, v) ?? 0
-      const raised = raisedFromHeight(raw, settings)
-      const byte = encodeBumpMeshGrey(raised)
+      const ink = inkFromHeight(raw, settings)
+      const byte = encodeBumpMeshGrey(ink)
       const i = (y * size + x) * 4
       data[i] = byte
       data[i + 1] = byte
@@ -63,8 +69,8 @@ function convertCanvasToBumpMeshImage(
     const lum =
       (0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!) / 255 *
       (data[i + 3]! / 255)
-    const raised = raisedFromHeight(lum, settings)
-    const byte = encodeBumpMeshGrey(raised)
+    const ink = inkFromHeight(lum, settings)
+    const byte = encodeBumpMeshGrey(ink)
     out[i] = byte
     out[i + 1] = byte
     out[i + 2] = byte

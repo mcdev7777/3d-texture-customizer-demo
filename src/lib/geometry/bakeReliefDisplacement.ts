@@ -44,7 +44,9 @@ const VERTEX_QUANT = 1e5
 /**
  * Displacement along the surface normal from a luminance height sample.
  * Built-in patterns use dark ink on white; the invert setting flips which tones
- * count as raised features. Matches shader preview emboss/engrave intent.
+ * count as the pattern's ink. The ink drives the feature; white (non-ink) stays
+ * flat at 0. Emboss raises the ink outward (+depth); engrave carves it inward
+ * (−depth), cutting the pattern into the surface. Matches shader preview intent.
  */
 export function getEmbossDisplacement(
   height: number,
@@ -54,8 +56,7 @@ export function getEmbossDisplacement(
 ): number {
   const h = clamp01(height)
   const ink = inverted ? h : 1 - h
-  const raised = mode === 'engrave' ? 1 - ink : ink
-  return raised * depthWorld
+  return mode === 'engrave' ? -ink * depthWorld : ink * depthWorld
 }
 
 function shapeReliefHeight(raw: number, smoothing: number): number {
