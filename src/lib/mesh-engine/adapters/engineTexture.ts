@@ -15,10 +15,19 @@ function raisedFromHeight(raw: number, settings: SurfacePatternSettings): number
   return settings.mode === 'engrave' ? 1 - ink : ink
 }
 
-/** Encode relief as BumpMesh greyscale: 0.5 = neutral, white = outward. */
+/**
+ * Encode relief as BumpMesh greyscale. The pipeline's default (non-symmetric)
+ * displacement is `disp = grey * amplitude`, i.e. grey 0 = no displacement and
+ * grey 1 = full height — so `raised` maps straight to grey. This keeps flat
+ * (raised = 0) tones at exactly 0mm and raised (raised = 1) tones at the full
+ * depth, matching the emboss/engrave intent: in emboss, ink/black rises to
+ * `depth` and white stays at 0; in engrave the roles swap.
+ *
+ * In symmetric mode the pipeline re-centers this (`grey - 0.5`) so raised tones
+ * push outward and flat tones push inward equally.
+ */
 function encodeBumpMeshGrey(raised: number): number {
-  const grey = 0.5 + raised * 0.5
-  return Math.round(Math.min(1, Math.max(0, grey)) * 255)
+  return Math.round(Math.min(1, Math.max(0, raised)) * 255)
 }
 
 function rasterizeProcedural(
