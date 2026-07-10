@@ -5,7 +5,8 @@
       "Bash(which chromium-cli; ls \"/tmp/claude-1000/bundled-skills/2.1.204/\" 2>/dev/null | grep -i chrom)",
       "Read(//tmp/claude-1000/bundled-skills/2.1.204/**)",
       "Bash(npx --yes chromium-cli --help)",
-      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")"
+      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")",
+      "Bash(perl -0pi -e 's/\\(\\\\n\\(\\\\s*\\)scale: definition\\\\.defaultScale,\\)/$1\\\\n$2scaleX: definition.defaultScale,\\\\n$2scaleY: definition.defaultScale,/g' src/store/usePatternStore.ts)"
     ]
   }
 }

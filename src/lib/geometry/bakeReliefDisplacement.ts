@@ -26,6 +26,7 @@ import {
   type SubdivisionQuality,
 } from './subdivideSelection'
 import type { PatternMode } from '../../types/pattern'
+import { patternScaleU, patternScaleV } from '../../types/pattern'
 import { clamp01 } from '../textures/heightMapSampler'
 import { yieldIfBusy } from '../export/exportProgress'
 
@@ -259,7 +260,8 @@ export async function bakeReliefIntoGeometry(
 
   const patternDetail = {
     patternId: region.settings.patternId,
-    scale: region.settings.scale,
+    // Finest of the two axes drives subdivision density.
+    scale: Math.min(patternScaleU(region.settings), patternScaleV(region.settings)),
     projection,
   }
 

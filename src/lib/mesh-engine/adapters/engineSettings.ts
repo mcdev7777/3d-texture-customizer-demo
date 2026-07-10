@@ -1,4 +1,5 @@
 import type { ExportQuality } from '../../../types/bake'
+import { patternScaleU, patternScaleV } from '../../../types/pattern'
 import type { PatternRegion } from '../../materials/patternMaterialApply'
 import {
   computeReliefEdgeTargets,
@@ -64,7 +65,9 @@ function rawFineEdgeMm(quality: ExportQuality, region: PatternRegion, bounds: En
   const maxDimMm = Math.max(bounds.size.x, bounds.size.y, bounds.size.z, 1e-6)
   const { fineEdge } = computeReliefEdgeTargets(quality, 1, {
     patternId: region.settings.patternId,
-    scale: region.settings.scale,
+    // Finest of the two axes drives subdivision so both directions get enough
+    // triangles for the smaller-tiled (higher-repeat) axis.
+    scale: Math.min(patternScaleU(region.settings), patternScaleV(region.settings)),
     projection: { width: maxDimMm, height: maxDimMm },
   })
   return fineEdge
@@ -92,12 +95,13 @@ export function buildLayerSettings(region: PatternRegion, amplitude: number): En
   // stay the same convention the live preview shader uses (patternShaderMaterial.ts
   // divides pu by patternRepeatScale for the same reason) so 2D preview and
   // 3D/export show the same tiling for the same scale value.
-  const scaleUV = Math.max(0.05, settings.scale)
+  const scaleU = Math.max(0.05, patternScaleU(settings))
+  const scaleV = Math.max(0.05, patternScaleV(settings))
 
   return {
     mappingMode: mapSelectionToMappingMode(region),
-    scaleU: scaleUV,
-    scaleV: scaleUV,
+    scaleU,
+    scaleV,
     // Preserve sign (engrave passes a negative amplitude to carve inward);
     // only clamp the magnitude away from zero.
     amplitude: Math.sign(amplitude || 1) * Math.max(Math.abs(amplitude), 1e-6),
