@@ -57,7 +57,7 @@ export const useCustomTextureStore = create<CustomTextureState>((set, get) => ({
     const objectUrl = URL.createObjectURL(file)
     try {
       const image = await loadImage(objectUrl)
-      const canvas = imageToHeightMaskCanvas(image, { size: 256 })
+      const canvas = imageToHeightMaskCanvas(image, { size: 128 })
       const id = `custom-${Date.now()}`
       registerCustomPatternCanvas(id, canvas)
 
