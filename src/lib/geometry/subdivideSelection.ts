@@ -32,8 +32,8 @@ const QUALITY_ANCHORS: Record<1 | 5 | 10, QualityConfig> = {
   1: {
     fineEdgeLengthMm: 0.12,
     coarseEdgeLengthMm: 0.6,
-    maxTriangles: 140_000,
-    outputTriangles: 70_000,
+    maxTriangles: 420_000,
+    outputTriangles: 210_000,
     maxIterations: 6,
     varianceThreshold: 0.05,
     textureSize: 256,
@@ -43,8 +43,8 @@ const QUALITY_ANCHORS: Record<1 | 5 | 10, QualityConfig> = {
   5: {
     fineEdgeLengthMm: 0.048,
     coarseEdgeLengthMm: 0.3,
-    maxTriangles: 280_000,
-    outputTriangles: 120_000,
+    maxTriangles: 840_000,
+    outputTriangles: 360_000,
     maxIterations: 8,
     varianceThreshold: 0.04,
     textureSize: 512,
@@ -54,8 +54,8 @@ const QUALITY_ANCHORS: Record<1 | 5 | 10, QualityConfig> = {
   10: {
     fineEdgeLengthMm: 0.003,
     coarseEdgeLengthMm: 0.036,
-    maxTriangles: 5_000_000,
-    outputTriangles: 3_000_000,
+    maxTriangles: 15_000_000,
+    outputTriangles: 9_000_000,
     maxIterations: 12,
     varianceThreshold: 0.006,
     textureSize: 4096,
