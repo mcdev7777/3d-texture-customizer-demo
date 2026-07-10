@@ -27,6 +27,7 @@ import {
 } from './subdivideSelection'
 import type { PatternMode } from '../../types/pattern'
 import { patternScaleU, patternScaleV } from '../../types/pattern'
+import { MAX_EXPORT_QUALITY } from '../../types/bake'
 import { clamp01 } from '../textures/heightMapSampler'
 import { yieldIfBusy } from '../export/exportProgress'
 
@@ -230,7 +231,7 @@ export async function bakeReliefIntoGeometry(
       : region.triangleIndices
   const bounds = computePatternBounds(mesh, pristineGeometry, boundsTriangles)
 
-  const exportQuality = quality === 'preview' ? 'high' : quality
+  const exportQuality = quality === 'preview' ? MAX_EXPORT_QUALITY : quality
   const mappingCtx = createProjectionContext(
     region.settings.patternId,
     region.settings,

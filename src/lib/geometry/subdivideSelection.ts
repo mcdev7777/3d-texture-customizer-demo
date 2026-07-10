@@ -5,10 +5,31 @@ import {
   type BufferAttribute,
 } from 'three'
 import type { ExportQuality } from '../../types/bake'
+import { MIN_EXPORT_QUALITY, MAX_EXPORT_QUALITY } from '../../types/bake'
 import { yieldIfBusy } from '../export/exportProgress'
 
-export const EXPORT_QUALITY = {
-  low: {
+export interface QualityConfig {
+  fineEdgeLengthMm: number
+  coarseEdgeLengthMm: number
+  maxTriangles: number
+  outputTriangles: number
+  maxIterations: number
+  varianceThreshold: number
+  textureSize: number
+  segmentsAcrossFeature: number
+  weldToleranceMm: number
+}
+
+/**
+ * Tuned anchor presets. The client-facing control is now a 1–10 slider; these
+ * three anchors (levels 1, 5, 10) preserve the previously hand-tuned
+ * low/medium/high behaviour, and `getQualityConfig` interpolates every level in
+ * between. Fields that span orders of magnitude (triangle budgets, texture
+ * size, edge lengths, tolerances) are interpolated in log space so the
+ * perceived detail step is roughly even across the slider.
+ */
+const QUALITY_ANCHORS: Record<1 | 5 | 10, QualityConfig> = {
+  1: {
     fineEdgeLengthMm: 0.12,
     coarseEdgeLengthMm: 0.6,
     maxTriangles: 140_000,
@@ -19,7 +40,7 @@ export const EXPORT_QUALITY = {
     segmentsAcrossFeature: 8,
     weldToleranceMm: 0.001,
   },
-  medium: {
+  5: {
     fineEdgeLengthMm: 0.048,
     coarseEdgeLengthMm: 0.3,
     maxTriangles: 280_000,
@@ -30,7 +51,7 @@ export const EXPORT_QUALITY = {
     segmentsAcrossFeature: 15,
     weldToleranceMm: 0.001,
   },
-  high: {
+  10: {
     fineEdgeLengthMm: 0.003,
     coarseEdgeLengthMm: 0.036,
     maxTriangles: 5_000_000,
@@ -41,28 +62,71 @@ export const EXPORT_QUALITY = {
     segmentsAcrossFeature: 180,
     weldToleranceMm: 0.0002,
   },
-} as const satisfies Record<
-  ExportQuality,
-  {
-    fineEdgeLengthMm: number
-    coarseEdgeLengthMm: number
-    maxTriangles: number
-    outputTriangles: number
-    maxIterations: number
-    varianceThreshold: number
-    textureSize: number
-    segmentsAcrossFeature: number
-    weldToleranceMm: number
+}
+
+const QUALITY_KEYS: Array<keyof QualityConfig> = [
+  'fineEdgeLengthMm',
+  'coarseEdgeLengthMm',
+  'maxTriangles',
+  'outputTriangles',
+  'maxIterations',
+  'varianceThreshold',
+  'textureSize',
+  'segmentsAcrossFeature',
+  'weldToleranceMm',
+]
+
+/** Log-space interpolation between two positive values. */
+function logLerp(a: number, b: number, t: number): number {
+  return Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t)
+}
+
+const qualityConfigCache = new Map<number, QualityConfig>()
+
+/**
+ * Resolve a 1–10 slider level to a full pipeline config, interpolating between
+ * the tuned anchors at 1 / 5 / 10. Integer levels 1, 5, 10 reproduce the old
+ * low/medium/high presets exactly.
+ */
+export function getQualityConfig(quality: ExportQuality): QualityConfig {
+  const level = Math.min(
+    MAX_EXPORT_QUALITY,
+    Math.max(MIN_EXPORT_QUALITY, Number.isFinite(quality) ? quality : 5),
+  )
+  const cached = qualityConfigCache.get(level)
+  if (cached) return cached
+
+  // Pick the anchor pair the level falls between (1..5 or 5..10).
+  const [loKey, hiKey] = level <= 5 ? ([1, 5] as const) : ([5, 10] as const)
+  const lo = QUALITY_ANCHORS[loKey]
+  const hi = QUALITY_ANCHORS[hiKey]
+  const t = (level - loKey) / (hiKey - loKey)
+
+  const cfg = {} as QualityConfig
+  for (const key of QUALITY_KEYS) {
+    const value = logLerp(lo[key], hi[key], t)
+    // Triangle counts, iterations, texture size and feature segments are counts —
+    // round them; keep continuous fields (edge lengths, tolerances) as-is.
+    cfg[key] =
+      key === 'fineEdgeLengthMm' ||
+      key === 'coarseEdgeLengthMm' ||
+      key === 'varianceThreshold' ||
+      key === 'weldToleranceMm'
+        ? value
+        : Math.round(value)
   }
->
+
+  qualityConfigCache.set(level, cfg)
+  return cfg
+}
 
 export function getExportOutputTriangles(quality: ExportQuality): number {
-  return EXPORT_QUALITY[quality].outputTriangles
+  return getQualityConfig(quality).outputTriangles
 }
 
 /** Upper bound for relief subdivision — targets output budget directly (no decimation pass). */
 export function getExportBakeTriangleCap(quality: ExportQuality): number {
-  const cfg = EXPORT_QUALITY[quality]
+  const cfg = getQualityConfig(quality)
   return Math.min(cfg.maxTriangles, Math.ceil(cfg.outputTriangles * 1.08))
 }
 
@@ -75,7 +139,7 @@ export function shouldSkipExportDecimation(
 }
 
 export function getExportWeldToleranceMm(quality: ExportQuality): number {
-  return EXPORT_QUALITY[quality].weldToleranceMm
+  return getQualityConfig(quality).weldToleranceMm
 }
 
 function edgeKey(a: number, b: number): string {
@@ -541,7 +605,7 @@ export function computeReliefEdgeTargets(
     projection: { width: number; height: number }
   },
 ): { fineEdge: number; coarseEdge: number } {
-  const cfg = EXPORT_QUALITY[quality]
+  const cfg = getQualityConfig(quality)
   const unit = Math.max(exportUnitScale, 1e-6)
   let fineEdge = cfg.fineEdgeLengthMm / unit
   let coarseEdge = cfg.coarseEdgeLengthMm / unit
@@ -592,7 +656,7 @@ export async function subdivideForReliefPattern(
   },
   onProgress?: (fraction: number) => void,
 ): Promise<SubdivideResult> {
-  const cfg = EXPORT_QUALITY[quality]
+  const cfg = getQualityConfig(quality)
   const bakeTriangleCap = getExportBakeTriangleCap(quality)
   const { fineEdge, coarseEdge } = computeReliefEdgeTargets(
     quality,
@@ -674,7 +738,7 @@ export function estimateReliefSubdivisionIterations(
 ): number {
   if (quality === 'preview') return geometry.index && geometry.index.count / 3 <= 24 ? 1 : 0
 
-  const cfg = EXPORT_QUALITY[quality]
+  const cfg = getQualityConfig(quality)
   const { fineEdge } = computeReliefEdgeTargets(quality, exportUnitScale, patternDetail)
   const currentMaxEdge = maxEdgeLengthInSelection(geometry, selectedTriangles)
   if (!Number.isFinite(currentMaxEdge) || currentMaxEdge <= fineEdge) return 0
