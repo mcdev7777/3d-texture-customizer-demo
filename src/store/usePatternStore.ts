@@ -47,6 +47,8 @@ function settingsEqual(a: SurfacePatternSettings, b: SurfacePatternSettings): bo
     a.patternId === b.patternId &&
     a.mode === b.mode &&
     a.scale === b.scale &&
+    (a.scaleX ?? a.scale) === (b.scaleX ?? b.scale) &&
+    (a.scaleY ?? a.scale) === (b.scaleY ?? b.scale) &&
     a.rotation === b.rotation &&
     a.offsetX === b.offsetX &&
     a.offsetY === b.offsetY &&
@@ -83,6 +85,8 @@ export const usePatternStore = create<PatternState>((set, get) => ({
           ...DEFAULT_PATTERN_SETTINGS,
           patternId,
           scale: definition.defaultScale,
+          scaleX: definition.defaultScale,
+          scaleY: definition.defaultScale,
           depth: definition.defaultDepth,
         }
 
@@ -112,6 +116,8 @@ export const usePatternStore = create<PatternState>((set, get) => ({
             ...DEFAULT_PATTERN_SETTINGS,
             patternId,
             scale: definition.defaultScale,
+            scaleX: definition.defaultScale,
+            scaleY: definition.defaultScale,
             depth: definition.defaultDepth,
           }
 

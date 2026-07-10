@@ -19,6 +19,8 @@ function placementSignature(
     patternId: string | null
     mode: string
     scale: number
+    scaleX?: number
+    scaleY?: number
     rotation: number
     offsetX: number
     offsetY: number
@@ -34,6 +36,8 @@ function placementSignature(
     settings.patternId,
     settings.mode,
     settings.scale,
+    settings.scaleX ?? settings.scale,
+    settings.scaleY ?? settings.scale,
     settings.rotation,
     settings.offsetX,
     settings.offsetY,

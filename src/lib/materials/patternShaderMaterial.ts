@@ -17,7 +17,7 @@ import {
 } from 'three'
 import type { SelectionMode } from '../../types/surfaceSelection'
 import type { SurfacePatternSettings } from '../../types/pattern'
-import { DEPTH_MAX } from '../../types/pattern'
+import { DEPTH_MAX, patternScaleU, patternScaleV } from '../../types/pattern'
 import { createSurfaceProjectionFromHighlight, type SurfaceProjection } from '../geometry/surfaceProjection'
 import { getExportUnitScale, getSelectionTileWorld } from '../textures/patternPlacementMath'
 import { depthLevelToDisplacementWorld } from '../pattern/patternDepth'
@@ -26,6 +26,7 @@ import { computePatternBounds, type PatternBounds } from './patternBounds'
 
 const MAPPING_PLANAR = 0
 const MAPPING_CUBIC = 1
+const MAPPING_CYLINDRICAL = 2
 
 type PatternUniformBag = Record<string, { value: unknown }>
 
@@ -49,8 +50,11 @@ uniform float patternSelectionHeight;
 // else in the app (image/texture editors, CAD) — scale 2 = each tile twice
 // as big (fewer repeats across the selection); scale 0.5 = each tile half
 // as big (more repeats — e.g. a 2x2 grid of tiles across the selection).
-// UV is divided by it, not multiplied.
+// UV is divided by it, not multiplied. patternRepeatScale is the U (horizontal)
+// axis; patternRepeatScaleV is the V (vertical) axis, so the two directions can
+// be tiled independently.
 uniform float patternRepeatScale;
+uniform float patternRepeatScaleV;
 uniform float patternRotationRad;
 uniform vec2 patternOffsetUV;
 uniform vec2 patternTextureAspect;
@@ -60,6 +64,13 @@ uniform int patternEngraveMode;
 uniform int patternMappingMode;
 uniform vec3 patternBoundsMin;
 uniform vec3 patternBoundsSize;
+uniform vec3 patternCylCenter;
+uniform vec3 patternCylAxis;
+uniform vec3 patternCylRight;
+uniform vec3 patternCylUp;
+uniform float patternCylRadius;
+
+const float PATTERN_TWO_PI = 6.28318530718;
 
 varying vec3 vPatternWorldPos;
 
@@ -119,7 +130,7 @@ float patternHeightPlanar(vec3 pos) {
   float uWorld = dot(rel, patternTangentWorld);
   float vWorld = dot(rel, patternBitangentWorld);
   float pu = (uWorld / max(patternSelectionWidth, 1e-4) + 0.5) / patternRepeatScale;
-  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) / patternRepeatScale;
+  float pv = (vWorld / max(patternSelectionHeight, 1e-4) + 0.5) / patternRepeatScaleV;
   return patternSampleMap(vec2(pu, pv));
 }
 
@@ -133,15 +144,32 @@ float patternHeightCubic(vec3 pos, vec3 projN) {
   float xyU = (pos.x - patternBoundsMin.x) / md;
   if (projN.z < 0.0) xyU = -xyU;
 
-  float hXY = patternSampleMap(vec2(xyU / patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) / patternRepeatScale));
-  float hXZ = patternSampleMap(vec2(xzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScale));
-  float hYZ = patternSampleMap(vec2(yzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScale));
+  float hXY = patternSampleMap(vec2(xyU / patternRepeatScale, ((pos.y - patternBoundsMin.y) / md) / patternRepeatScaleV));
+  float hXZ = patternSampleMap(vec2(xzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScaleV));
+  float hYZ = patternSampleMap(vec2(yzU / patternRepeatScale, ((pos.z - patternBoundsMin.z) / md) / patternRepeatScaleV));
 
   vec3 wts = patternCubicBlendWeights(projN);
   return hXY * wts.z + hXZ * wts.y + hYZ * wts.x;
 }
 
+// Cylindrical side projection: go-around angle → U, along-axis height → V, both
+// scaled by circumference so a tile stays square (no grazing-angle stretch).
+float patternHeightCylindrical(vec3 pos) {
+  vec3 d = pos - patternCylCenter;
+  float h = dot(d, patternCylAxis);
+  float rx = dot(d, patternCylRight);
+  float ry = dot(d, patternCylUp);
+  float theta = atan(ry, rx);
+  float circumference = max(PATTERN_TWO_PI * patternCylRadius, 1e-4);
+  float uRaw = theta / PATTERN_TWO_PI + 0.5;
+  float vRaw = h / circumference;
+  float pu = uRaw / patternRepeatScale;
+  float pv = vRaw / patternRepeatScaleV;
+  return patternSampleMap(vec2(pu, pv));
+}
+
 float patternHeightAt(vec3 pos, vec3 projN) {
+  if (patternMappingMode == 2) return patternHeightCylindrical(pos);
   if (patternMappingMode == 1) return patternHeightCubic(pos, projN);
   return patternHeightPlanar(pos);
 }
@@ -187,6 +215,13 @@ export interface PatternMaterialOptions {
   patternTexture?: Texture
   mappingMode: SelectionMode
   bounds?: PatternBounds
+  cylinder?: {
+    axis: Vector3
+    center: Vector3
+    right: Vector3
+    up: Vector3
+    radius: number
+  }
 }
 
 function isStandardCompatibleMaterial(
@@ -244,16 +279,28 @@ function buildUniforms(options: PatternMaterialOptions): PatternUniformBag {
     patternTileWorld: { value: tileWorld },
     patternSelectionWidth: { value: projection.width },
     patternSelectionHeight: { value: projection.height },
-    patternRepeatScale: { value: Math.max(0.05, settings.scale) },
+    patternRepeatScale: { value: Math.max(0.05, patternScaleU(settings)) },
+    patternRepeatScaleV: { value: Math.max(0.05, patternScaleV(settings)) },
     patternRotationRad: { value: (settings.rotation * Math.PI) / 180 },
     patternOffsetUV: { value: new Vector2(settings.offsetX, settings.offsetY) },
     patternTextureAspect: { value: new Vector2(aspect.u, aspect.v) },
     patternAmplitude: { value: amplitude },
     patternInvert: { value: settings.invert ? 1 : 0 },
     patternEngraveMode: { value: settings.mode === 'engrave' ? 1 : 0 },
-    patternMappingMode: { value: mappingMode === 'part' ? MAPPING_CUBIC : MAPPING_PLANAR },
+    patternMappingMode: {
+      value: options.cylinder
+        ? MAPPING_CYLINDRICAL
+        : mappingMode === 'part'
+          ? MAPPING_CUBIC
+          : MAPPING_PLANAR,
+    },
     patternBoundsMin: { value: b.min.clone() },
     patternBoundsSize: { value: b.size.clone() },
+    patternCylCenter: { value: options.cylinder?.center.clone() ?? new Vector3() },
+    patternCylAxis: { value: options.cylinder?.axis.clone() ?? new Vector3(0, 0, 1) },
+    patternCylRight: { value: options.cylinder?.right.clone() ?? new Vector3(1, 0, 0) },
+    patternCylUp: { value: options.cylinder?.up.clone() ?? new Vector3(0, 1, 0) },
+    patternCylRadius: { value: options.cylinder?.radius ?? 1 },
   }
 }
 
@@ -386,6 +433,7 @@ export function buildPatternMaterialOptions(
     mappingMode?: SelectionMode
     cubicBoundsTriangles?: readonly number[]
     sharedBoundsWorld?: { min: Vector3; max: Vector3 }
+    cylinder?: { axis: Vector3; center: Vector3; right: Vector3; up: Vector3; radius: number }
   },
   baseMaterial: Material,
 ): PatternMaterialOptions {
@@ -417,6 +465,7 @@ export function buildPatternMaterialOptions(
     modelRoot,
     mappingMode,
     bounds,
+    cylinder: region.cylinder,
   }
 }
 

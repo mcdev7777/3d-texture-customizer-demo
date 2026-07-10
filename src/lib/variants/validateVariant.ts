@@ -24,6 +24,8 @@ function sanitizeSettings(raw: unknown): SurfacePatternSettings | null {
     patternId: s.patternId,
     mode: s.mode,
     scale: s.scale,
+    scaleX: isNumber(s.scaleX) ? s.scaleX : s.scale,
+    scaleY: isNumber(s.scaleY) ? s.scaleY : s.scale,
     rotation: s.rotation,
     offsetX: s.offsetX,
     offsetY: s.offsetY,

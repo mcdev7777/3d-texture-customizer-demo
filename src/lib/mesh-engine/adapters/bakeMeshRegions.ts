@@ -32,6 +32,49 @@ function sharedBoundsToEngineBounds(min: Vector3, max: Vector3, positionScale: n
   }
 }
 
+/**
+ * World-space (soup) AABB of just a region's triangles. Used as the per-layer
+ * UV-scale reference so the bake tiles the pattern at the same size the shader
+ * preview does (which scales against the selection, not the whole mesh).
+ * `positions` is the non-indexed mesh soup (9 floats per triangle); the region's
+ * triangle ids index it directly.
+ */
+function computeRegionSoupBounds(
+  positions: Float32Array,
+  triangleIndices: readonly number[],
+): EngineBounds | undefined {
+  if (triangleIndices.length === 0) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let minZ = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let maxZ = -Infinity
+  const triCount = positions.length / 9
+  for (const t of triangleIndices) {
+    if (t < 0 || t >= triCount) continue
+    for (let k = 0; k < 3; k++) {
+      const o = t * 9 + k * 3
+      const x = positions[o]
+      const y = positions[o + 1]
+      const z = positions[o + 2]
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (z < minZ) minZ = z
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
+      if (z > maxZ) maxZ = z
+    }
+  }
+  if (!Number.isFinite(minX)) return undefined
+  return {
+    min: { x: minX, y: minY, z: minZ },
+    max: { x: maxX, y: maxY, z: maxZ },
+    size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
+    center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 },
+  }
+}
+
 export interface BakeMeshRegionsResult {
   positions: Float32Array
   normals: Float32Array | null
@@ -104,10 +147,15 @@ export async function bakeMeshRegions(
       imageData: texture.imageData,
       imgWidth: texture.width,
       imgHeight: texture.height,
-      settings: buildLayerSettings(region, amplitude),
+      settings: buildLayerSettings(region, amplitude, soupScale),
+      // The pattern's tile size must be normalized against the SAME reference
+      // the live shader preview uses — the selection's own extent — not the
+      // whole mesh's AABB (the pipeline-wide `bounds`). Otherwise a small
+      // selection on a larger/taller mesh bakes at a different (zoomed) scale
+      // than the 2D preview shows. A cross-mesh merge keeps its shared frame.
       bounds: region.sharedBoundsWorld
         ? sharedBoundsToEngineBounds(region.sharedBoundsWorld.min, region.sharedBoundsWorld.max, soupScale)
-        : undefined,
+        : computeRegionSoupBounds(positions, region.triangleIndices),
     }
   })
 

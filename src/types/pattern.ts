@@ -26,7 +26,16 @@ export type PatternMode = 'emboss' | 'engrave'
 export interface SurfacePatternSettings {
   patternId: PatternId | null
   mode: PatternMode
+  /**
+   * Uniform tile-size multiplier. Kept for backward compatibility and as the
+   * fallback when a per-axis scale is not set. Prefer reading the effective
+   * per-axis scale via {@link patternScaleU} / {@link patternScaleV}.
+   */
   scale: number
+  /** Per-axis (U / horizontal) tile-size multiplier. Falls back to `scale`. */
+  scaleX?: number
+  /** Per-axis (V / vertical) tile-size multiplier. Falls back to `scale`. */
+  scaleY?: number
   rotation: number
   offsetX: number
   offsetY: number
@@ -39,10 +48,22 @@ export interface SurfacePatternSettings {
   symmetric: boolean
 }
 
+/** Effective U-axis (horizontal) tile-size multiplier, falling back to `scale`. */
+export function patternScaleU(s: SurfacePatternSettings): number {
+  return s.scaleX ?? s.scale
+}
+
+/** Effective V-axis (vertical) tile-size multiplier, falling back to `scale`. */
+export function patternScaleV(s: SurfacePatternSettings): number {
+  return s.scaleY ?? s.scale
+}
+
 export const DEFAULT_PATTERN_SETTINGS: SurfacePatternSettings = {
   patternId: null,
   mode: 'emboss',
   scale: 1,
+  scaleX: 1,
+  scaleY: 1,
   rotation: 0,
   offsetX: 0,
   offsetY: 0,
