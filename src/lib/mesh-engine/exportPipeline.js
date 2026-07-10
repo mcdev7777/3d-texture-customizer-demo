@@ -36,6 +36,7 @@ import { subdivide } from './subdivision.js';
 import { regularizeMesh } from './regularize.js';
 import { applyDisplacement } from './displacement.js';
 import { decimate } from './decimation.js';
+import { taubinSmooth } from './smoothing.js';
 import { resolveTJunctions, countEdgeDefects, countAreaSlivers } from './meshRepair.js';
 
 const yieldFrame = () => new Promise(r => setTimeout(r, 0));
@@ -319,33 +320,110 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
       if (shouldAbort()) return null;
     }
 
-    if (settings.bottomAngleLimit > 0) {
-      clampBelowBottom(finalGeometry, bounds.min.z);
-    }
-    if (settings.smoothBottom) {
-      snapBottomToFlat(finalGeometry, bounds.min.z, 0.1);
-    }
+    // Finishing tail (bottom clamp → smooth bottom → T-junction repair) plus
+    // the print-invariant measurement, factored so it can run on either the
+    // smoothed or the un-smoothed geometry (see the smoothing fallback below).
+    // Consumes `geo` (mutates in place / disposes it when repair replaces it)
+    // and returns the finished geometry + its defect counts.
+    const finishTail = (geo) => {
+      if (settings.bottomAngleLimit > 0) clampBelowBottom(geo, bounds.min.z);
+      if (settings.smoothBottom) snapBottomToFlat(geo, bounds.min.z, 0.1);
+      let stats = null;
+      if (runDecimation) {
+        const beforeSlivers = countAreaSlivers(geo);
+        const repaired = resolveTJunctions(geo);
+        geo.dispose();
+        geo = repaired;
+        const after = countEdgeDefects(geo);
+        stats = { beforeSlivers, open: after.open, nonManifold: after.nonManifold, slivers: countAreaSlivers(geo), tris: after.tris };
+      }
+      const inv = countEdgeDefects(geo);
+      const slivers = countAreaSlivers(geo);
+      if (!stats) stats = { beforeSlivers: slivers, open: inv.open, nonManifold: inv.nonManifold, slivers, tris: inv.tris };
+      const clean = inv.open === 0 && inv.nonManifold === 0 && slivers === 0;
+      return { geo, stats, clean, inv, slivers };
+    };
 
-    // Resolve T-junctions so the export is watertight & manifold. Only on the
-    // decimated (sparse) mesh — welding the dense pre-decimation mesh at the
-    // export grid would collapse fine detail into degenerates.
     let repairStats = null;
-    if (runDecimation) {
+
+    // Taubin smoothing — softens hard facet ridges/step-edges and rounds curved
+    // feature edges (freezeMode:'curved' keeps straight edges crisp, rounds
+    // curved rims). It's a QUALITY enhancement: if on some (pathological) input
+    // it would break the print invariant (0 open / 0 non-manifold / 0 slivers),
+    // we DISCARD the smoothed result and export the un-smoothed geometry instead
+    // — watertightness is non-negotiable, softness is best-effort. Runs before
+    // the bottom clamp/snap so the bed-contact plane stays flat.
+    if (settings.smoothingIterations > 0) {
+      onEvent('smooth', 0);
+      await yieldFrame();
+      // Pristine copy of the pre-smoothing (post-decimation) mesh, kept for the
+      // fallback. finishTail is watertight-by-construction on this input.
+      const preSmooth = finalGeometry.clone();
+      // moveClampFactor bounds how far a curved-crease vertex may round away
+      // from its original position (as a multiple of local edge length) — it's
+      // the dominant lever on fillet SIZE, independent of iteration count.
+      // Scale it with the smoothness level (via iteration count, 0..~14) so
+      // low smoothness stays a light touch and high smoothness produces a
+      // deep, clearly-soft rounded fillet on curved edges.
+      const MAX_SMOOTHING_ITERATIONS_REF = 14;
+      const smoothT = Math.min(1, settings.smoothingIterations / MAX_SMOOTHING_ITERATIONS_REF);
+      const moveClampFactor = 2 + smoothT * 7; // 2 (light) .. 9 (deep fillet)
+      const smoothed = taubinSmooth(
+        finalGeometry,
+        settings.smoothingIterations,
+        { sharpAngleDeg: 55, freezeMode: 'curved', moveClampFactor },
+        (p) => onEvent('smooth', p),
+      );
+      if (smoothed !== finalGeometry) {
+        if (displaced === finalGeometry) displaced = null; // may alias (no decimation)
+        finalGeometry.dispose();
+        finalGeometry = smoothed;
+      }
+      if (shouldAbort()) { preSmooth.dispose(); return null; }
+
       onEvent('repair', 0);
       await yieldFrame();
-      const beforeSlivers = countAreaSlivers(finalGeometry);
-      const repaired = resolveTJunctions(finalGeometry);
-      finalGeometry.dispose();
-      finalGeometry = repaired;
-      const after = countEdgeDefects(finalGeometry);
-      repairStats = {
-        beforeSlivers,
-        open: after.open,
-        nonManifold: after.nonManifold,
-        slivers: countAreaSlivers(finalGeometry),
-        tris: after.tris,
-      };
+      const smoothedResult = finishTail(finalGeometry);
+      if (smoothedResult.clean) {
+        finalGeometry = smoothedResult.geo;
+        repairStats = smoothedResult.stats;
+        preSmooth.dispose();
+      } else {
+        // Smoothing broke the invariant — fall back to the un-smoothed mesh.
+        console.warn(
+          `[export] smoothing produced a non-print-safe mesh (open=${smoothedResult.inv.open} ` +
+          `nonManifold=${smoothedResult.inv.nonManifold} slivers=${smoothedResult.slivers}); ` +
+          `exporting the un-smoothed geometry for this mesh to guarantee watertightness.`,
+        );
+        smoothedResult.geo.dispose();
+        const fallback = finishTail(preSmooth);
+        finalGeometry = fallback.geo;
+        repairStats = { ...fallback.stats, smoothingFellBack: true };
+      }
       if (shouldAbort()) return null;
+    } else {
+      onEvent('repair', 0);
+      await yieldFrame();
+      const result = finishTail(finalGeometry);
+      finalGeometry = result.geo;
+      repairStats = result.stats;
+      if (shouldAbort()) return null;
+    }
+
+    // ── Print invariant (ALWAYS) ─────────────────────────────────────────────
+    // Final guarantee on the geometry actually being returned. After the
+    // fallback above this should never fire; if it does, something upstream of
+    // smoothing (subdivision/displace/decimate/repair) produced a broken mesh.
+    {
+      const inv = countEdgeDefects(finalGeometry);
+      const invSlivers = countAreaSlivers(finalGeometry);
+      if (inv.open > 0 || inv.nonManifold > 0 || invSlivers > 0) {
+        console.error(
+          `[export invariant VIOLATED] open=${inv.open} nonManifold=${inv.nonManifold} ` +
+          `slivers=${invSlivers} tris=${inv.tris} — exported mesh is NOT print-safe. ` +
+          `This is a bug in the export pipeline (subdivision / displace / decimate / repair).`,
+        );
+      }
     }
 
     done = true;

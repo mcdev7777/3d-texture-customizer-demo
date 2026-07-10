@@ -24,6 +24,13 @@ interface BakeState {
   error: string | null
   previewActive: boolean
   exportQuality: ExportQuality
+  /**
+   * Surface-smoothness value (0–100) applied to the baked geometry at export
+   * time: 0 = crisp, 100 = softest. Drives both the heightmap-boundary blur
+   * and the Taubin mesh-smoothing pass. Creases/hard corners stay sharp
+   * regardless.
+   */
+  exportSmoothness: number
   /** True while a background export job is running (does not block other UI). */
   exportActive: boolean
   exportProgress: ExportProgressState | null
@@ -39,6 +46,7 @@ interface BakeState {
 
   setPreviewActive: (active: boolean) => void
   setExportQuality: (quality: ExportQuality) => void
+  setExportSmoothness: (level: number) => void
   setShow3DPreview: (show: boolean) => void
   setShow3DPreviewBusy: (busy: boolean) => void
   applyTexture: () => Promise<boolean>
@@ -57,6 +65,7 @@ export const useBakeStore = create<BakeState>((set, get) => {
   error: null,
   previewActive: false,
   exportQuality: DEFAULT_EXPORT_QUALITY,
+  exportSmoothness: 30,
   exportActive: false,
   exportProgress: null,
   show3DPreview: false,
@@ -65,6 +74,9 @@ export const useBakeStore = create<BakeState>((set, get) => {
   setPreviewActive: (active) => set({ previewActive: active }),
 
   setExportQuality: (quality) => set({ exportQuality: quality }),
+
+  setExportSmoothness: (value) =>
+    set({ exportSmoothness: Math.max(0, Math.min(100, Math.round(value))) }),
 
   setShow3DPreview: (show) => set({ show3DPreview: show }),
 
@@ -239,6 +251,7 @@ export const useBakeStore = create<BakeState>((set, get) => {
     }
 
     const quality = get().exportQuality
+    const smoothnessLevel = get().exportSmoothness
     const fileName = useAppStore.getState().fileName?.replace(/\.[^.]+$/, '') ?? 'textured-model'
 
     set({
@@ -256,6 +269,7 @@ export const useBakeStore = create<BakeState>((set, get) => {
           placements,
           committedSurfaceIds,
           quality,
+          smoothnessLevel,
           exportUnitScale: loadedModel.exportUnitScale,
           onProgress: (fraction, label) => {
             set({ exportProgress: { fraction, label } })

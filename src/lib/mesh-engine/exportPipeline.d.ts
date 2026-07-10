@@ -40,6 +40,8 @@ export interface EngineSettings {
   seamBandWidth: number
   /** Laplacian smoothing iterations on the per-vertex blend normal that drives cubic/triplanar blend weights. */
   blendNormalSmoothing: number
+  /** Taubin (λ/μ) surface-smoothing iterations applied to the baked geometry before the bottom clamp. 0 = off. */
+  smoothingIterations: number
 }
 
 /** Per-region displacement pass — everything a single texture/pattern needs to be baked in isolation. */
@@ -122,6 +124,7 @@ export type PipelineStage =
   | 'subdivide2'
   | 'displace'
   | 'decimate'
+  | 'smooth'
   | 'repair'
 
 export type PipelineEventHandler = (

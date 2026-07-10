@@ -88,8 +88,9 @@ const STAGE_FRACTIONS: Record<string, [number, number]> = {
   regularize: [0.33, 0.36],
   subdivide2: [0.36, 0.42],
   displace: [0.42, 0.72],
-  decimate: [0.72, 0.88],
-  repair: [0.88, 0.94],
+  decimate: [0.72, 0.85],
+  smooth: [0.85, 0.9],
+  repair: [0.9, 0.94],
 }
 
 function stageLabel(stage: string, info?: Record<string, unknown>): string {
@@ -107,6 +108,8 @@ function stageLabel(stage: string, info?: Record<string, unknown>): string {
         : 'Displacing vertices…'
     case 'decimate':
       return 'Decimating mesh…'
+    case 'smooth':
+      return 'Smoothing surface…'
     case 'repair':
       return 'Repairing mesh…'
     default:

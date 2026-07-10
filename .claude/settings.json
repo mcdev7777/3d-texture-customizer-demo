@@ -5,7 +5,26 @@
       "Bash(which chromium-cli; ls \"/tmp/claude-1000/bundled-skills/2.1.204/\" 2>/dev/null | grep -i chrom)",
       "Read(//tmp/claude-1000/bundled-skills/2.1.204/**)",
       "Bash(npx --yes chromium-cli --help)",
-      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")"
+      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")",
+      "Bash(grep -iA2 '\"dependencies\"')",
+      "Bash(npx vite *)",
+      "Bash(npx eslint *)",
+      "Bash(node --check src/lib/mesh-engine/smoothing.js)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node scripts/verify-export.mjs)",
+      "Bash(echo \"harness exit: $?\")",
+      "Read(//tmp/**)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(node scripts/diag-rim.mjs)",
+      "Bash(sed -i 's/heightmap\\(256,8\\)/heightmap\\(256\\)/' scripts/diag-rim.mjs)",
+      "Bash(FREEZE_CREASES=0 node scripts/diag-rim.mjs)",
+      "Bash(FREEZE_CREASES=0 node scripts/verify-export.mjs)",
+      "Bash(sed \"s#'./src/lib#'/home/mighty/Documents/GitHub/Local Projects/3d-texture-customizer-demo/src/lib#\" /tmp/edge-test.mjs)",
+      "Bash(node scripts/tmp-edge-test.mjs)",
+      "Bash(grep -vE \"^ *$\")",
+      "Bash(node scripts/tune-curve.mjs)"
     ]
   }
 }

@@ -68,10 +68,19 @@ export async function exportModifiedModel(params: {
   committedSurfaceIds: readonly string[]
   quality: ExportQuality
   exportUnitScale: number
+  smoothnessLevel?: number
   onProgress?: ExportProgressCallback
 }): Promise<void> {
-  const { object, format, placements, committedSurfaceIds, quality, exportUnitScale, onProgress } =
-    params
+  const {
+    object,
+    format,
+    placements,
+    committedSurfaceIds,
+    quality,
+    exportUnitScale,
+    smoothnessLevel = 0,
+    onProgress,
+  } = params
   const baseName = params.fileName ?? 'textured-model'
 
   const report = (fraction: number, label: string) => {
@@ -86,6 +95,7 @@ export async function exportModifiedModel(params: {
       committedSurfaceIds,
       quality,
       exportUnitScale,
+      smoothnessLevel,
       onProgress: (fraction, label) => report(fraction, label),
     })
     const blob = new Blob([zip as BlobPart], {
@@ -100,6 +110,7 @@ export async function exportModifiedModel(params: {
     committedSurfaceIds,
     quality,
     exportUnitScale,
+    smoothnessLevel,
     onProgress: (fraction, label) => {
       report(0.02 + fraction * 0.88, label)
     },

@@ -29,10 +29,11 @@ export async function export3mfFast(
     committedSurfaceIds: readonly string[]
     quality: ExportQuality
     exportUnitScale: number
+    smoothnessLevel?: number
     onProgress?: ExportProgressCallback
   },
 ): Promise<Uint8Array> {
-  const { placements, committedSurfaceIds, quality, exportUnitScale, onProgress } = options
+  const { placements, committedSurfaceIds, quality, exportUnitScale, smoothnessLevel = 0, onProgress } = options
   const exportMeshes = collectExportMeshes(root)
   if (exportMeshes.length === 0) {
     throw new Error('No exportable geometry found for 3MF export.')
@@ -72,6 +73,8 @@ export async function export3mfFast(
       exportUnitScale,
       mapPipelineProgress(onProgress, meshIndex, exportMeshes.length),
       isStale,
+      [],
+      smoothnessLevel,
     )
 
     if (!result || isStale()) {
