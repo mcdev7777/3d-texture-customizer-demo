@@ -8,7 +8,26 @@
       "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")",
       "Bash(perl -0pi -e 's/\\(\\\\n\\(\\\\s*\\)scale: definition\\\\.defaultScale,\\)/$1\\\\n$2scaleX: definition.defaultScale,\\\\n$2scaleY: definition.defaultScale,/g' src/store/usePatternStore.ts)",
       "Bash(node --check src/lib/mesh-engine/mapping.js)",
-      "Bash(node --check src/lib/mesh-engine/displacement.js)"
+      "Bash(node --check src/lib/mesh-engine/displacement.js)",
+      "Bash(npm run *)",
+      "Read(//tmp/**)",
+      "Bash(timeout 15 bash -c 'until curl -sf http://localhost:5183 >/dev/null; do sleep 1; done')",
+      "Read(//tmp/claude-1000/bundled-skills/2.1.206/**)",
+      "Bash(find / -maxdepth 4 -iname \"chromium-cli*\")",
+      "Bash(find / -iname \"chromium-cli\" -not -path \"*/node_modules/*\" 2>/dev/null; npm ls -g 2>/dev/null | grep -i chrom; which npx; ls ~/.claude/skills 2>/dev/null)",
+      "Read(//home/mighty/.claude/**)",
+      "Bash(command -v chromium-cli 2>/dev/null; echo \"---\"; ls /tmp/claude-1000/bundled-skills/2.1.206/ 2>/dev/null)",
+      "Bash(python3 -c \"import shutil; print\\(shutil.which\\('google-chrome'\\), shutil.which\\('chromium'\\), shutil.which\\('chromium-browser'\\)\\)\")",
+      "Bash(npx --yes playwright --version)",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(node drive.mjs)",
+      "Bash(node drive2.mjs)",
+      "Bash(sed -i \"s/getByText\\('HexGrid', { exact: true }\\)/getByTitle\\('Hex', { exact: true }\\)/\" drive2.mjs)",
+      "Bash(node drive3.mjs)",
+      "Bash(node drive4.mjs)",
+      "Bash(node drive5.mjs)",
+      "Bash(pkill -f \"vite --port 5183\")"
     ]
   }
 }

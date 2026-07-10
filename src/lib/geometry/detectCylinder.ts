@@ -198,6 +198,17 @@ export function detectCylinder(
   const axis = new Vector3(vectors[minIdx][0], vectors[minIdx][1], vectors[minIdx][2]).normalize()
   if (axis.lengthSq() < 0.5) return null
 
+  // A true cylindrical band has ONE small eigenvalue (along the axis, where
+  // normals don't vary) and TWO comparably large ones (normals fanning out
+  // radially in the plane ⟂ axis). A flat/planar region — every triangle
+  // sharing (near enough) one normal — instead has a rank-1 covariance: one
+  // large eigenvalue along the shared normal and TWO degenerate near-zero
+  // eigenvalues, so "smallest eigenvalue" is ambiguous noise rather than a
+  // meaningful axis. Reject that case before it's mistaken for a cylinder.
+  const sorted = [...values].sort((x, y) => x - y)
+  const [smallest, middle, largest] = sorted
+  if (largest > 1e-9 && middle - smallest < 0.05 * largest) return null
+
   const { right, up } = orthonormalBasis(axis)
 
   // Project vertices onto the (right, up) plane relative to centroid, then do

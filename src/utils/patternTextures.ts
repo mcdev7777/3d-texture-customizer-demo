@@ -367,7 +367,7 @@ export function imageToHeightMaskCanvas(
   image: HTMLImageElement,
   options: { size?: number; invert?: boolean } = {},
 ): HTMLCanvasElement {
-  const size = options.size ?? 256
+  const size = options.size ?? 128
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
@@ -398,7 +398,7 @@ export function getPatternDefinition(patternId: PatternId): PatternDefinition {
   return { id: patternId, ...CUSTOM_PATTERN_DEFINITION }
 }
 
-export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasElement {
+export function getPatternCanvas(patternId: PatternId, size = 128): HTMLCanvasElement {
   const custom = customCanvasRegistry.get(patternId)
   if (custom) return custom
 
@@ -416,10 +416,10 @@ export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasEl
   if (!ctx) throw new Error('Canvas 2D unavailable')
 
   if (isBuiltinPattern(patternId)) {
-    // Rasterize the vector drawer once at a fixed 256 base, then resample up to
-    // the requested size — matching how custom uploads are normalized to a 256
+    // Rasterize the vector drawer once at a fixed 128 base, then resample up to
+    // the requested size — matching how custom uploads are normalized to a 128
     // height-mask canvas and scaled on draw.
-    const BASE_SIZE = 256
+    const BASE_SIZE = 128
     let baseWidth = BASE_SIZE
     let baseHeight = BASE_SIZE
     if (patternId === 'hex' || patternId === 'honeycomb') {
