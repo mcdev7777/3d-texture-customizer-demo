@@ -320,90 +320,99 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
       if (shouldAbort()) return null;
     }
 
-    // Taubin smoothing — softens hard facet ridges and step-edges left by
-    // heightmap displacement without deflating the model (crease/boundary
-    // vertices stay frozen). Runs BEFORE the bottom clamp/snap so the
-    // bed-contact plane it produces stays perfectly flat.
+    // Finishing tail (bottom clamp → smooth bottom → T-junction repair) plus
+    // the print-invariant measurement, factored so it can run on either the
+    // smoothed or the un-smoothed geometry (see the smoothing fallback below).
+    // Consumes `geo` (mutates in place / disposes it when repair replaces it)
+    // and returns the finished geometry + its defect counts.
+    const finishTail = (geo) => {
+      if (settings.bottomAngleLimit > 0) clampBelowBottom(geo, bounds.min.z);
+      if (settings.smoothBottom) snapBottomToFlat(geo, bounds.min.z, 0.1);
+      let stats = null;
+      if (runDecimation) {
+        const beforeSlivers = countAreaSlivers(geo);
+        const repaired = resolveTJunctions(geo);
+        geo.dispose();
+        geo = repaired;
+        const after = countEdgeDefects(geo);
+        stats = { beforeSlivers, open: after.open, nonManifold: after.nonManifold, slivers: countAreaSlivers(geo), tris: after.tris };
+      }
+      const inv = countEdgeDefects(geo);
+      const slivers = countAreaSlivers(geo);
+      if (!stats) stats = { beforeSlivers: slivers, open: inv.open, nonManifold: inv.nonManifold, slivers, tris: inv.tris };
+      const clean = inv.open === 0 && inv.nonManifold === 0 && slivers === 0;
+      return { geo, stats, clean, inv, slivers };
+    };
+
+    let repairStats = null;
+
+    // Taubin smoothing — softens hard facet ridges/step-edges and rounds curved
+    // feature edges (freezeMode:'curved' keeps straight edges crisp, rounds
+    // curved rims). It's a QUALITY enhancement: if on some (pathological) input
+    // it would break the print invariant (0 open / 0 non-manifold / 0 slivers),
+    // we DISCARD the smoothed result and export the un-smoothed geometry instead
+    // — watertightness is non-negotiable, softness is best-effort. Runs before
+    // the bottom clamp/snap so the bed-contact plane stays flat.
     if (settings.smoothingIterations > 0) {
       onEvent('smooth', 0);
       await yieldFrame();
+      // Pristine copy of the pre-smoothing (post-decimation) mesh, kept for the
+      // fallback. finishTail is watertight-by-construction on this input.
+      const preSmooth = finalGeometry.clone();
       const smoothed = taubinSmooth(
         finalGeometry,
         settings.smoothingIterations,
-        // freezeCreases:false lets the 3D pass ROUND manifold feature edges —
-        // notably curved ones like circular hole rims — into soft fillets
-        // instead of preserving them hard (the "curved edges aren't soft"
-        // complaint). Boundary/non-manifold edges are still frozen (they'd
-        // open the mesh), and the fold-rejection guard bounds per-step
-        // rounding, so watertightness holds (verified by scripts/verify-export.mjs)
-        // and genuinely hard corners resist at low smoothness. The smoothness
-        // slider governs how far edges round.
-        { sharpAngleDeg: 55, freezeCreases: false },
+        { sharpAngleDeg: 55, freezeMode: 'curved' },
         (p) => onEvent('smooth', p),
       );
       if (smoothed !== finalGeometry) {
-        // finalGeometry may alias `displaced` (no decimation) — null the alias
-        // before disposing so the finally block can't double-dispose.
-        if (displaced === finalGeometry) displaced = null;
+        if (displaced === finalGeometry) displaced = null; // may alias (no decimation)
         finalGeometry.dispose();
         finalGeometry = smoothed;
       }
-      if (shouldAbort()) return null;
-    }
+      if (shouldAbort()) { preSmooth.dispose(); return null; }
 
-    if (settings.bottomAngleLimit > 0) {
-      clampBelowBottom(finalGeometry, bounds.min.z);
-    }
-    if (settings.smoothBottom) {
-      snapBottomToFlat(finalGeometry, bounds.min.z, 0.1);
-    }
-
-    // Resolve T-junctions so the export is watertight & manifold. Only on the
-    // decimated (sparse) mesh — welding the dense pre-decimation mesh at the
-    // export grid would collapse fine detail into degenerates.
-    let repairStats = null;
-    if (runDecimation) {
       onEvent('repair', 0);
       await yieldFrame();
-      const beforeSlivers = countAreaSlivers(finalGeometry);
-      const repaired = resolveTJunctions(finalGeometry);
-      finalGeometry.dispose();
-      finalGeometry = repaired;
-      const after = countEdgeDefects(finalGeometry);
-      repairStats = {
-        beforeSlivers,
-        open: after.open,
-        nonManifold: after.nonManifold,
-        slivers: countAreaSlivers(finalGeometry),
-        tris: after.tris,
-      };
+      const smoothedResult = finishTail(finalGeometry);
+      if (smoothedResult.clean) {
+        finalGeometry = smoothedResult.geo;
+        repairStats = smoothedResult.stats;
+        preSmooth.dispose();
+      } else {
+        // Smoothing broke the invariant — fall back to the un-smoothed mesh.
+        console.warn(
+          `[export] smoothing produced a non-print-safe mesh (open=${smoothedResult.inv.open} ` +
+          `nonManifold=${smoothedResult.inv.nonManifold} slivers=${smoothedResult.slivers}); ` +
+          `exporting the un-smoothed geometry for this mesh to guarantee watertightness.`,
+        );
+        smoothedResult.geo.dispose();
+        const fallback = finishTail(preSmooth);
+        finalGeometry = fallback.geo;
+        repairStats = { ...fallback.stats, smoothingFellBack: true };
+      }
+      if (shouldAbort()) return null;
+    } else {
+      onEvent('repair', 0);
+      await yieldFrame();
+      const result = finishTail(finalGeometry);
+      finalGeometry = result.geo;
+      repairStats = result.stats;
       if (shouldAbort()) return null;
     }
 
     // ── Print invariant (ALWAYS) ─────────────────────────────────────────────
-    // The exported mesh MUST be watertight (0 open edges), manifold (0 edges
-    // with 3+ faces) and free of zero-area slivers, or a slicer will refuse it
-    // / silently auto-repair it (punching holes). Assert on the FINAL geometry
-    // — including the no-decimation path, which skips resolveTJunctions above —
-    // and fail loudly so a regression in smoothing/subdivision/repair can never
-    // ship a broken export silently. See scripts/verify-export.mjs.
+    // Final guarantee on the geometry actually being returned. After the
+    // fallback above this should never fire; if it does, something upstream of
+    // smoothing (subdivision/displace/decimate/repair) produced a broken mesh.
     {
       const inv = countEdgeDefects(finalGeometry);
       const invSlivers = countAreaSlivers(finalGeometry);
-      if (!repairStats) {
-        repairStats = {
-          beforeSlivers: invSlivers,
-          open: inv.open,
-          nonManifold: inv.nonManifold,
-          slivers: invSlivers,
-          tris: inv.tris,
-        };
-      }
       if (inv.open > 0 || inv.nonManifold > 0 || invSlivers > 0) {
         console.error(
           `[export invariant VIOLATED] open=${inv.open} nonManifold=${inv.nonManifold} ` +
           `slivers=${invSlivers} tris=${inv.tris} — exported mesh is NOT print-safe. ` +
-          `This is a bug in the export pipeline (smoothing / subdivision / repair).`,
+          `This is a bug in the export pipeline (subdivision / displace / decimate / repair).`,
         );
       }
     }

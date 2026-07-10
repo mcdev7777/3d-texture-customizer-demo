@@ -26,7 +26,9 @@
  * @param {number}              [opts.lambda=0.5]        positive smoothing factor
  * @param {number}              [opts.mu=-0.53]          negative inflation factor (|mu| slightly > lambda)
  * @param {number}              [opts.sharpAngleDeg=35]  dihedral above which an edge counts as a crease
- * @param {boolean}             [opts.freezeCreases=true] freeze crease vertices (preserve hard edges); false rounds them into soft fillets
+ * @param {'all'|'curved'|'none'} [opts.freezeMode='all'] which creases to keep crisp: all (legacy), only straight ones (curved rims round), or none
+ * @param {number}              [opts.straightWindow=6]  loop steps each side used to judge crease straightness (freezeMode 'curved')
+ * @param {number}              [opts.straightBendDeg=24] windowed bend below which a crease counts as straight → frozen (freezeMode 'curved')
  * @param {function}            [onProgress]             callback(fraction 0–1)
  * @returns {THREE.BufferGeometry} new non-indexed geometry with per-face normals recomputed
  */
@@ -44,13 +46,6 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
   const lambda = opts.lambda ?? 0.5;
   const mu = opts.mu ?? -0.53;
   const sharpCos = Math.cos((opts.sharpAngleDeg ?? 35) * Math.PI / 180);
-  // When false, manifold crease edges (>sharpAngle dihedral) are NOT frozen —
-  // the general 3D Taubin pass is allowed to round them, softening curved
-  // feature edges (circular hole rims) into fillets. Boundary/non-manifold
-  // edges are always frozen regardless (they have no opposing face to average
-  // against, and moving them opens the mesh). The fold-rejection guard bounds
-  // how far any single edge can round per step, so hard corners still resist.
-  const freezeCreases = opts.freezeCreases ?? true;
 
   const pa = geometry.attributes.position.array;
   const cornerCount = pa.length / 3;
@@ -119,6 +114,8 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
   }
 
   const frozen = new Uint8Array(nUnique);
+  const isCrease = new Uint8Array(nUnique);   // endpoint of a manifold crease edge
+  const isBoundary = new Uint8Array(nUnique); // endpoint of a boundary/non-manifold edge
   // Up to 2 "crease neighbours" per vertex — the two vertices reached via a
   // crease/boundary edge, i.e. its neighbours along the crease LOOP (a
   // circular hole rim, a chamfer line). -1 = unset, -2 = more than 2 seen
@@ -150,18 +147,69 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
         secondFaceSeen[id] = 1;
         const dot = fnX[f0] * fnX[t] + fnY[f0] * fnY[t] + fnZ[f0] * fnZ[t];
         if (dot < sharpCos) {
-          if (freezeCreases) { frozen[lo] = 1; frozen[hi] = 1; }
+          isCrease[lo] = 1; isCrease[hi] = 1;
           addCreaseNeighbour(lo, hi); addCreaseNeighbour(hi, lo);
         }
       }
     }
-    // Boundary / non-manifold edges (incidence ≠ 2) also freeze their ends.
+    // Boundary / non-manifold edges (incidence ≠ 2) always freeze their ends —
+    // they have no opposing face to average against and moving them opens the mesh.
     for (let id = 0; id < nEdges; id++) {
       if (edgeCount[id] !== 2) {
         const lo = edgeLo[id], hi = edgeHi[id];
         frozen[lo] = 1; frozen[hi] = 1;
+        isBoundary[lo] = 1; isBoundary[hi] = 1;
         addCreaseNeighbour(lo, hi); addCreaseNeighbour(hi, lo);
       }
+    }
+  }
+
+  // ── Crease freezing: STRAIGHT creases stay crisp, CURVED creases round ─────
+  // A single subdivided segment of a circular rim is locally indistinguishable
+  // from a straight edge, so straightness is measured over a WINDOW walked
+  // along the crease loop: a straight edge (cube border) stays collinear, a
+  // circular hole rim accumulates turning. Straight-enough → freeze (crisp);
+  // curved → leave unfrozen so the 3D Taubin pass rounds it into a soft fillet.
+  // freezeMode: 'curved' = this classifier; 'all' = freeze every crease
+  // (legacy hard-edge preservation); 'none' = round every crease.
+  const freezeMode = opts.freezeMode ?? 'all';
+  if (freezeMode === 'all') {
+    for (let id = 0; id < nUnique; id++) if (isCrease[id]) frozen[id] = 1;
+  } else if (freezeMode === 'curved') {
+    const WIN = Math.max(2, Math.floor(opts.straightWindow ?? 8));
+    // Window vectors u,v point from the vertex toward each end of the window.
+    // For a straight run they are opposite → dot(û,v̂) ≈ -1; a bend of β° gives
+    // dot = -cos(β). Freeze (keep crisp) when the windowed bend is BELOW
+    // straightBendDeg, i.e. dot <= -cos(straightBendDeg).
+    const cosStraight = Math.cos((opts.straightBendDeg ?? 12) * Math.PI / 180);
+    // Walk `steps` vertices along the crease loop starting prev→cur. Returns the
+    // reached vertex, or -1 if the loop hits an endpoint / junction / boundary
+    // first (too short or irregular to classify — caller then freezes to be safe).
+    const walkLoop = (startPrev, startCur, steps) => {
+      let prev = startPrev, cur = startCur;
+      for (let s = 0; s < steps; s++) {
+        const a = creaseA[cur], b = creaseB[cur];
+        if (a < 0 || b < 0) return -1;               // endpoint / junction (-2 too)
+        const next = a === prev ? b : a;
+        if (next < 0) return -1;
+        prev = cur; cur = next;
+      }
+      return cur;
+    };
+    for (let id = 0; id < nUnique; id++) {
+      if (!isCrease[id] || frozen[id]) continue;
+      const na = creaseA[id], nb = creaseB[id];
+      if (na < 0 || nb < 0) { frozen[id] = 1; continue; } // junction/endpoint → keep crisp
+      const pm = walkLoop(id, na, WIN);
+      const pp = walkLoop(id, nb, WIN);
+      if (pm < 0 || pp < 0) { frozen[id] = 1; continue; } // loop too short → keep crisp
+      const ux = posX[pm] - posX[id], uy = posY[pm] - posY[id], uz = posZ[pm] - posZ[id];
+      const vx = posX[pp] - posX[id], vy = posY[pp] - posY[id], vz = posZ[pp] - posZ[id];
+      const ul = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
+      const vl = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+      const d = (ux * vx + uy * vy + uz * vz) / (ul * vl); // ≈ -1 when straight
+      if (d <= -cosStraight) frozen[id] = 1; // near-collinear window → straight → keep crisp
+      // else curved → stays unfrozen → the 3D pass rounds it soft
     }
   }
 
@@ -247,6 +295,37 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
     if (c !== a) { neighbors[csrStart[c] + cursor[c]++] = a; neighbors[csrStart[a] + cursor[a]++] = c; }
   }
 
+  // ── Cumulative-move clamp (anti-collapse) ────────────────────────────────
+  // Bound how far any vertex may drift from its ORIGINAL position, as a
+  // multiple of its shortest original incident edge. Without this, many
+  // smoothing iterations over a dense, high-frequency displaced surface can
+  // pull distinct vertices onto each other, producing non-manifold edges
+  // (3+ faces) even though each single step passes the fold guard. The bound
+  // is generous enough to still round curved feature edges into fillets.
+  const moveClampFactor = opts.moveClampFactor ?? 1.5;
+  const origX = new Float64Array(posX), origY = new Float64Array(posY), origZ = new Float64Array(posZ);
+  const maxMove = new Float64Array(nUnique);
+  for (let id = 0; id < nUnique; id++) {
+    let minE2 = Infinity;
+    for (let k = csrStart[id]; k < csrStart[id + 1]; k++) {
+      const nb = neighbors[k];
+      const dx = origX[nb] - origX[id], dy = origY[nb] - origY[id], dz = origZ[nb] - origZ[id];
+      const e2 = dx * dx + dy * dy + dz * dz;
+      if (e2 > 0 && e2 < minE2) minE2 = e2;
+    }
+    maxMove[id] = minE2 === Infinity ? 0 : Math.sqrt(minE2) * moveClampFactor;
+  }
+  const clampToOrigin = (id, cx, cy, cz) => {
+    const dx = cx - origX[id], dy = cy - origY[id], dz = cz - origZ[id];
+    const d2 = dx * dx + dy * dy + dz * dz;
+    const m = maxMove[id];
+    if (m > 0 && d2 > m * m) {
+      const s = m / Math.sqrt(d2);
+      return [origX[id] + dx * s, origY[id] + dy * s, origZ[id] + dz * s];
+    }
+    return null;
+  };
+
   // ── Taubin iterations ────────────────────────────────────────────────────
   let curX = posX, curY = posY, curZ = posZ;
   let nxtX = new Float64Array(nUnique);
@@ -279,9 +358,11 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
           const mx = (curX[na] + curX[nb]) / 2;
           const my = (curY[na] + curY[nb]) / 2;
           const mz = (curZ[na] + curZ[nb]) / 2;
-          const cx = curX[id] + factor * (mx - curX[id]);
-          const cy = curY[id] + factor * (my - curY[id]);
-          const cz = curZ[id] + factor * (mz - curZ[id]);
+          let cx = curX[id] + factor * (mx - curX[id]);
+          let cy = curY[id] + factor * (my - curY[id]);
+          let cz = curZ[id] + factor * (mz - curZ[id]);
+          const cl = clampToOrigin(id, cx, cy, cz);
+          if (cl) { cx = cl[0]; cy = cl[1]; cz = cl[2]; }
           if (!moveWouldFold(id, cx, cy, cz, curX, curY, curZ)) {
             nxtX[id] = cx; nxtY[id] = cy; nxtZ[id] = cz;
             continue;
@@ -303,11 +384,14 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
       const dx = sx * inv - curX[id];
       const dy = sy * inv - curY[id];
       const dz = sz * inv - curZ[id];
-      const cx = curX[id] + factor * dx;
-      const cy = curY[id] + factor * dy;
-      const cz = curZ[id] + factor * dz;
-      // Skip the move if it would fold or collapse an incident triangle —
-      // leaves that vertex where it is rather than tearing the surface.
+      let cx = curX[id] + factor * dx;
+      let cy = curY[id] + factor * dy;
+      let cz = curZ[id] + factor * dz;
+      // Bound cumulative drift from the original position (anti-collapse), then
+      // skip the move entirely if it would still fold/collapse an incident
+      // triangle — leaving the vertex put rather than tearing the surface.
+      const cl = clampToOrigin(id, cx, cy, cz);
+      if (cl) { cx = cl[0]; cy = cl[1]; cz = cl[2]; }
       if (moveWouldFold(id, cx, cy, cz, curX, curY, curZ)) {
         nxtX[id] = curX[id]; nxtY[id] = curY[id]; nxtZ[id] = curZ[id];
       } else {

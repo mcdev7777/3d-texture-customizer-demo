@@ -85,7 +85,10 @@ function boundsOf(positions) {
   }
 }
 
-// Hard-edged checkerboard heightmap (0/255) — worst case for boundary aliasing.
+// Two worst cases: hard-edged checkerboard (boundary aliasing) AND
+// high-frequency per-texel noise (dense displacement spikes that stress the
+// smoother into potential weld-collision non-manifold edges). Both must stay
+// print-safe.
 function makeHardHeightmap(size, cells) {
   const data = new Uint8ClampedArray(size * size * 4)
   const cell = size / cells
@@ -97,6 +100,18 @@ function makeHardHeightmap(size, cells) {
       data[i] = data[i + 1] = data[i + 2] = g
       data[i + 3] = 255
     }
+  }
+  return { data, width: size, height: size }
+}
+
+function makeNoiseHeightmap(size) {
+  const data = new Uint8ClampedArray(size * size * 4)
+  let seed = 12345
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+  for (let i = 0; i < size * size; i++) {
+    const g = (rnd() * 255) | 0
+    data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = g
+    data[i * 4 + 3] = 255
   }
   return { data, width: size, height: size }
 }
@@ -136,10 +151,10 @@ const regularizeOpts = {
   aggressiveNormalDeltaCos: Math.cos((25 * Math.PI) / 180),
 }
 
-async function runOne(smoothness, shape) {
+async function runOne(smoothness, shape, pattern) {
   const positions = shape === 'cylinder' ? makeCylinder(12, 8, 64) : makeBox(20, 20, 10)
   const bounds = boundsOf(positions)
-  const imageData = makeHardHeightmap(256, 8)
+  const imageData = pattern === 'noise' ? makeNoiseHeightmap(256) : makeHardHeightmap(256, 8)
   const iterations = smoothnessToIterations(smoothness)
   const t0 = Date.now()
   const result = await runExportPipeline(
@@ -172,10 +187,11 @@ async function runOne(smoothness, shape) {
 const SWEEP = [0, 15, 30, 60, 100]
 let failed = false
 for (const shape of ['box', 'cylinder']) {
-  console.log(`\n── ${shape} ──`)
+  for (const pattern of ['checker', 'noise']) {
+  console.log(`\n── ${shape} / ${pattern} ──`)
   console.log('smooth  iters   tris     time     STL(MB)  open  nonManif  slivers')
   for (const s of SWEEP) {
-    const r = await runOne(s, shape)
+    const r = await runOne(s, shape, pattern)
     const ok = r.defects.open === 0 && r.defects.nonManifold === 0 && r.slivers === 0
     if (!ok) failed = true
     console.log(
@@ -185,6 +201,7 @@ for (const shape of ['box', 'cylinder']) {
       `${String(r.defects.open).padStart(4)}  ${String(r.defects.nonManifold).padStart(8)}  ` +
       `${String(r.slivers).padStart(7)}  ${ok ? 'OK' : '❌ DEFECT'}`,
     )
+  }
   }
 }
 
