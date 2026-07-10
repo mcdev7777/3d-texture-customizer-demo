@@ -416,7 +416,25 @@ export function getPatternCanvas(patternId: PatternId, size = 256): HTMLCanvasEl
   if (!ctx) throw new Error('Canvas 2D unavailable')
 
   if (isBuiltinPattern(patternId)) {
-    PATTERN_DRAWERS[patternId](ctx, width, height)
+    // Rasterize the vector drawer once at a fixed 256 base, then resample up to
+    // the requested size — matching how custom uploads are normalized to a 256
+    // height-mask canvas and scaled on draw.
+    const BASE_SIZE = 256
+    let baseWidth = BASE_SIZE
+    let baseHeight = BASE_SIZE
+    if (patternId === 'hex' || patternId === 'honeycomb') {
+      const baseDims = getHexTileDimensions(BASE_SIZE)
+      baseWidth = baseDims.width
+      baseHeight = baseDims.height
+    }
+    const baseCanvas = document.createElement('canvas')
+    baseCanvas.width = baseWidth
+    baseCanvas.height = baseHeight
+    const baseCtx = baseCanvas.getContext('2d')
+    if (!baseCtx) throw new Error('Canvas 2D unavailable')
+    PATTERN_DRAWERS[patternId](baseCtx, baseWidth, baseHeight)
+
+    ctx.drawImage(baseCanvas, 0, 0, width, height)
     return canvas
   }
 

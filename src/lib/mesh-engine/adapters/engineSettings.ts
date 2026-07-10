@@ -98,7 +98,9 @@ export function buildLayerSettings(region: PatternRegion, amplitude: number): En
     mappingMode: mapSelectionToMappingMode(region),
     scaleU: scaleUV,
     scaleV: scaleUV,
-    amplitude: Math.max(amplitude, 1e-6),
+    // Preserve sign (engrave passes a negative amplitude to carve inward);
+    // only clamp the magnitude away from zero.
+    amplitude: Math.sign(amplitude || 1) * Math.max(Math.abs(amplitude), 1e-6),
     offsetU: settings.offsetX,
     offsetV: settings.offsetY,
     rotation: settings.rotation,

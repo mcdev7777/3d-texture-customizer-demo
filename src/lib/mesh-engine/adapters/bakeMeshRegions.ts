@@ -100,7 +100,11 @@ export async function bakeMeshRegions(
     )
     // depthLevelToDisplacementWorld(depth, mm-per-unit) = depthMm / mm-per-unit,
     // so with mmPerPositionUnit=1 (export) this reduces to depthMm exactly.
-    const amplitude = depthLevelToDisplacementWorld(region.settings.depth, mmPerPositionUnit)
+    // Sign carries the mode: emboss = +amplitude (ink rises outward), engrave =
+    // −amplitude (ink carves inward, cutting the pattern into the surface). The
+    // grey texture holds only the unsigned ink intensity (see engineTexture.ts).
+    const magnitude = depthLevelToDisplacementWorld(region.settings.depth, mmPerPositionUnit)
+    const amplitude = region.settings.mode === 'engrave' ? -magnitude : magnitude
     return {
       triangleSet: buildTriangleSet(triangleCount, region.triangleIndices),
       imageData: texture.imageData,

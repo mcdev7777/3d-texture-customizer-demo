@@ -436,13 +436,25 @@ export function collectAllExportRegionsForMesh(
   const seen = new Set<string>()
   const state = meshStates.get(mesh.uuid)
 
+  // A surface that has a live preview region supersedes its already-committed
+  // region: the preview *is* the new pattern the user is placing. Emitting both
+  // bakes the same triangles twice — two overlapping patterns on one surface.
+  const previewedBaseIds = new Set<string>()
+  if (state) {
+    for (const region of state.regions) {
+      if (!isPreviewRegion(region.surfaceId)) continue
+      const baseId = region.surfaceId.slice(PREVIEW_PREFIX.length)
+      if (preview.has(baseId)) previewedBaseIds.add(baseId)
+    }
+  }
+
   if (state) {
     for (const region of state.regions) {
       const isPreview = isPreviewRegion(region.surfaceId)
       const baseId = isPreview ? region.surfaceId.slice(PREVIEW_PREFIX.length) : region.surfaceId
       if (isPreview) {
         if (!preview.has(baseId)) continue
-      } else if (!committed.has(baseId)) {
+      } else if (!committed.has(baseId) || previewedBaseIds.has(baseId)) {
         continue
       }
 
