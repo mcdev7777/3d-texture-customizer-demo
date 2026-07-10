@@ -359,10 +359,19 @@ export async function runExportPipeline(input, onEvent = () => {}, shouldAbort =
       // Pristine copy of the pre-smoothing (post-decimation) mesh, kept for the
       // fallback. finishTail is watertight-by-construction on this input.
       const preSmooth = finalGeometry.clone();
+      // moveClampFactor bounds how far a curved-crease vertex may round away
+      // from its original position (as a multiple of local edge length) — it's
+      // the dominant lever on fillet SIZE, independent of iteration count.
+      // Scale it with the smoothness level (via iteration count, 0..~14) so
+      // low smoothness stays a light touch and high smoothness produces a
+      // deep, clearly-soft rounded fillet on curved edges.
+      const MAX_SMOOTHING_ITERATIONS_REF = 14;
+      const smoothT = Math.min(1, settings.smoothingIterations / MAX_SMOOTHING_ITERATIONS_REF);
+      const moveClampFactor = 2 + smoothT * 7; // 2 (light) .. 9 (deep fillet)
       const smoothed = taubinSmooth(
         finalGeometry,
         settings.smoothingIterations,
-        { sharpAngleDeg: 55, freezeMode: 'curved' },
+        { sharpAngleDeg: 55, freezeMode: 'curved', moveClampFactor },
         (p) => onEvent('smooth', p),
       );
       if (smoothed !== finalGeometry) {

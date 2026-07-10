@@ -302,7 +302,7 @@ export function taubinSmooth(geometry, iterations, opts = {}, onProgress) {
   // pull distinct vertices onto each other, producing non-manifold edges
   // (3+ faces) even though each single step passes the fold guard. The bound
   // is generous enough to still round curved feature edges into fillets.
-  const moveClampFactor = opts.moveClampFactor ?? 1.5;
+  const moveClampFactor = opts.moveClampFactor ?? 5;
   const origX = new Float64Array(posX), origY = new Float64Array(posY), origZ = new Float64Array(posZ);
   const maxMove = new Float64Array(nUnique);
   for (let id = 0; id < nUnique; id++) {
