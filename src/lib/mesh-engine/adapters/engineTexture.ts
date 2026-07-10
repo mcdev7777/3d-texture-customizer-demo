@@ -1,6 +1,6 @@
 import type { PatternId, SurfacePatternSettings } from '../../../types/pattern'
 import type { ExportQuality } from '../../../types/bake'
-import { EXPORT_QUALITY } from '../../geometry/subdivideSelection'
+import { getQualityConfig } from '../../geometry/subdivideSelection'
 import { getPatternCanvas } from '../../../utils/patternTextures'
 import { getPatternImageData } from '../../../utils/patternTextures'
 import { evaluatePattern } from '../../textures/patternEvaluators'
@@ -91,7 +91,7 @@ export function buildDisplacementTexture(
   settings: SurfacePatternSettings,
   quality: ExportQuality,
 ): DisplacementTexture {
-  const size = EXPORT_QUALITY[quality].textureSize
+  const size = getQualityConfig(quality).textureSize
 
   const custom = getPatternImageData(patternId, size)
   if (custom) {

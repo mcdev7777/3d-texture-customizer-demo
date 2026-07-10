@@ -3,19 +3,14 @@ import { Panel } from '../ui/Panel'
 import { Button } from '../ui/Button'
 import { useAppStore } from '../../store/useAppStore'
 import { useBakeStore } from '../../store/useBakeStore'
-import type { ExportFormat, ExportQuality } from '../../types/bake'
+import type { ExportFormat } from '../../types/bake'
+import { MIN_EXPORT_QUALITY, MAX_EXPORT_QUALITY, clampExportQuality } from '../../types/bake'
 
 const FORMATS: Array<{ format: ExportFormat; label: string; note: string }> = [
   { format: '3mf', label: '3MF', note: 'Printable relief — recommended for PrusaSlicer.' },
   { format: 'stl', label: 'STL', note: 'Geometry only — slicers and printers.' },
   { format: 'obj', label: 'OBJ', note: 'Geometry only — most 3D editors.' },
   { format: 'glb', label: 'GLB', note: 'Geometry and vertex colors.' },
-]
-
-const QUALITY_OPTIONS: Array<{ value: ExportQuality; label: string; note: string }> = [
-  { value: 'low', label: 'Low', note: 'Smaller file, less detail.' },
-  { value: 'medium', label: 'Medium', note: 'Balanced default.' },
-  { value: 'high', label: 'High', note: 'More detail, larger file.' },
 ]
 
 export function ExportModelPanel() {
@@ -46,24 +41,26 @@ export function ExportModelPanel() {
       )}
 
       <div className="mb-3">
-        <span className="text-[10px] text-slate-500 uppercase tracking-wide">Export quality</span>
-        <div className="mt-1.5 grid grid-cols-3 gap-1.5">
-          {QUALITY_OPTIONS.map(({ value, label, note }) => (
-            <button
-              key={value}
-              type="button"
-              disabled={isApplying}
-              title={note}
-              onClick={() => setExportQuality(value)}
-              className={`rounded-md px-2 py-1.5 text-xs transition-colors ${
-                exportQuality === value
-                  ? 'bg-purple-600/30 text-purple-200 ring-1 ring-purple-500/40'
-                  : 'bg-white/5 text-slate-400 hover:bg-white/8'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">Export quality</span>
+          <span className="text-[11px] text-purple-200 tabular-nums">
+            {exportQuality}
+            <span className="text-slate-500"> / {MAX_EXPORT_QUALITY}</span>
+          </span>
+        </div>
+        <input
+          type="range"
+          min={MIN_EXPORT_QUALITY}
+          max={MAX_EXPORT_QUALITY}
+          step={1}
+          value={exportQuality}
+          disabled={isApplying}
+          onChange={(e) => setExportQuality(clampExportQuality(e.target.valueAsNumber))}
+          className="mt-2 w-full accent-purple-500 disabled:opacity-50"
+        />
+        <div className="mt-0.5 flex justify-between text-[9px] text-slate-500">
+          <span>Faster</span>
+          <span>More detail</span>
         </div>
       </div>
 

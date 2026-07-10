@@ -6,6 +6,7 @@ import { usePatternStore } from '../../store/usePatternStore'
 import { useBakeStore } from '../../store/useBakeStore'
 import { useSurfaceSelectionStore } from '../../store/useSurfaceSelectionStore'
 import { bakeMeshRegions } from '../../lib/mesh-engine/adapters/bakeMeshRegions'
+import { MAX_EXPORT_QUALITY } from '../../types/bake'
 import {
   setCommittedRegionsHiddenForMesh,
   setPreviewRegionsHiddenForMesh,
@@ -140,17 +141,17 @@ export function Pattern3DPreviewOverlay() {
 
         const meshPreviewIds = previewIdsByMesh.get(meshUuid) ?? []
 
-        // 'high' quality — this is how users judge print fidelity while
+        // Max quality — this is how users judge print fidelity while
         // still choosing a pattern, so it must look right, not like a
-        // cheaper approximation. Export's own quality selector (Low/Medium/
-        // High) is separate and untouched — this only affects the preview
+        // cheaper approximation. Export's own 1–10 quality slider is
+        // separate and untouched — this only affects the preview
         // overlay's own bake.
         const result = await bakeMeshRegions(
           mesh,
           modelObject,
           placements,
           committedSurfaceIds,
-          'high',
+          MAX_EXPORT_QUALITY,
           exportUnitScale,
           1,
           undefined,

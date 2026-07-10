@@ -2,10 +2,11 @@ import { Vector3 } from 'three'
 import type { PatternId, SurfacePatternSettings } from '../../types/pattern'
 import { patternScaleU, patternScaleV } from '../../types/pattern'
 import type { ExportQuality } from '../../types/bake'
+import { DEFAULT_EXPORT_QUALITY } from '../../types/bake'
 import type { SelectionMode } from '../../types/surfaceSelection'
 import type { PatternBounds } from '../materials/patternBounds'
 import type { SurfaceProjection } from '../geometry/surfaceProjection'
-import { EXPORT_QUALITY } from '../geometry/subdivideSelection'
+import { getQualityConfig } from '../geometry/subdivideSelection'
 import { getSelectionTileWorld } from './patternPlacementMath'
 import { evaluatePattern } from './patternEvaluators'
 import { getPatternImageData } from '../../utils/patternTextures'
@@ -124,11 +125,11 @@ export function createProjectionContext(
   projection: SurfaceProjection,
   bounds: PatternBounds,
   _exportUnitScale: number,
-  exportQuality: ExportQuality = 'medium',
+  exportQuality: ExportQuality = DEFAULT_EXPORT_QUALITY,
 ): ProjectionContext {
   const aspect = getPatternTextureAspect(patternId)
   const tileWorld = getSelectionTileWorld(projection, aspect.u, aspect.v, settings.scale)
-  const textureSize = EXPORT_QUALITY[exportQuality].textureSize
+  const textureSize = getQualityConfig(exportQuality).textureSize
 
   return {
     patternId,
