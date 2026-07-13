@@ -27,7 +27,14 @@
       "Bash(node drive3.mjs)",
       "Bash(node drive4.mjs)",
       "Bash(node drive5.mjs)",
-      "Bash(pkill -f \"vite --port 5183\")"
+      "Bash(pkill -f \"vite --port 5183\")",
+      "Bash(unzip -l bumpmesh.zip)",
+      "Bash(unzip -q \"/home/mighty/Documents/GitHub/Local Projects/3d-texture-customizer-demo/bumpmesh.zip\" -d bump)",
+      "Bash(sed -n '/EngineLayerSettings/,/^}/p' src/lib/mesh-engine/exportPipeline.d.ts)",
+      "Bash(sed -n '/EngineBounds/,/^}/p' src/lib/mesh-engine/exportPipeline.d.ts)",
+      "Bash(npx vite *)",
+      "Bash(grep -iE \"^gl$|headless-gl|gl-\")",
+      "Bash(node -e \"try{require\\('gl'\\);console.log\\('has-gl'\\)}catch\\(e\\){console.log\\('no-gl'\\)}\")"
     ]
   }
 }

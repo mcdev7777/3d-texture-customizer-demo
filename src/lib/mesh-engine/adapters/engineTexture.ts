@@ -3,8 +3,16 @@ import type { ExportQuality } from '../../../types/bake'
 import { getQualityConfig } from '../../geometry/subdivideSelection'
 import { getPatternCanvas } from '../../../utils/patternTextures'
 import { getPatternImageData } from '../../../utils/patternTextures'
-import { evaluatePattern } from '../../textures/patternEvaluators'
+import { evaluatePattern, smoothstep } from '../../textures/patternEvaluators'
 import { shapeHeightSample } from '../../textures/heightMapSampler'
+
+// Background dead-zone. White is flat and near-white must stay flat: bilinear
+// sampling at tile seams / soft edges lands a hair below pure white, and a
+// linear 1−h mapping turns that into a faint raised ink line at every pattern
+// border — most visible at scale < 1 where tile repeats pack together. Snapping
+// ink below INK_FLOOR to zero (and rescaling the remainder) makes those white
+// borders truly zero-height, matching the preview shader's smoothstep(0.08, …).
+const INK_FLOOR = 0.08
 
 /**
  * The pattern's ink intensity (black = 1) as a [0,1] grey value, respecting
@@ -17,7 +25,10 @@ function inkFromHeight(raw: number, settings: SurfacePatternSettings): number {
     invert: settings.invert ?? false,
     smoothing: settings.smoothing ?? 0,
   })
-  return settings.invert ? h : 1 - h
+  const ink = settings.invert ? h : 1 - h
+  // Zero out background (near-white) ink so borders carry no height, then
+  // rescale [INK_FLOOR, 1] → [0, 1] so real features keep their full depth.
+  return smoothstep(INK_FLOOR, 1, ink)
 }
 
 /**
