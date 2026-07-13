@@ -333,6 +333,59 @@ const PATTERN_DRAWERS: Record<BuiltinPatternId, DrawFn> = {
   },
 }
 
+/**
+ * Soften hard pattern edges so the displacement height-mask transitions as a
+ * gradient instead of a binary cliff. Built-in patterns are drawn with pure
+ * ink/background, which produces vertical walls in the displaced mesh; a small
+ * Gaussian blur turns each edge into a short ramp that the mesh follows as a
+ * fillet. Radius scales with canvas size so the softness stays constant in UV
+ * space regardless of the rasterization resolution.
+ */
+function smoothPatternEdges(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): void {
+  // ~1.4px at the 128 base resolution, scaled to the target canvas.
+  const radius = Math.max(0.75, (Math.min(width, height) / 128) * 1.4)
+
+  // Pad by enough that the blur kernel near an edge only reads real (wrapped)
+  // pixels, never the canvas void. `blur(r)` has an effective reach of ~3r.
+  const pad = Math.max(2, Math.ceil(radius * 3))
+
+  // Build a tiled (wrapped) source so the blur at each edge samples the pattern
+  // as it actually repeats. Blurring the bare canvas instead reads the area
+  // OUTSIDE it as transparent black, which darkens the border → raised ink →
+  // a visible seam frame around every tile (worst at scale < 1 where tiles are
+  // dense). Tiling first makes the softened edges continuous across the wrap.
+  const padded = document.createElement('canvas')
+  padded.width = width + pad * 2
+  padded.height = height + pad * 2
+  const padCtx = padded.getContext('2d')
+  if (!padCtx) return
+  const src = ctx.canvas
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      padCtx.drawImage(src, pad + dx * width, pad + dy * height)
+    }
+  }
+
+  // Blur the tiled buffer, then copy the center region back over the original.
+  const blurred = document.createElement('canvas')
+  blurred.width = padded.width
+  blurred.height = padded.height
+  const blurCtx = blurred.getContext('2d')
+  if (!blurCtx) return
+  blurCtx.filter = `blur(${radius}px)`
+  blurCtx.drawImage(padded, 0, 0)
+
+  ctx.clearRect(0, 0, width, height)
+  ctx.drawImage(blurred, pad, pad, width, height, 0, 0, width, height)
+
+  // Re-tile the outermost row/col so bilinear RepeatWrapping stays exact.
+  enforceTileWrap(ctx, width, height)
+}
+
 const thumbnailCache = new Map<PatternId, string>()
 
 /**
@@ -367,7 +420,7 @@ export function imageToHeightMaskCanvas(
   image: HTMLImageElement,
   options: { size?: number; invert?: boolean } = {},
 ): HTMLCanvasElement {
-  const size = options.size ?? 128
+  const size = options.size ?? 512
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
@@ -389,6 +442,7 @@ export function imageToHeightMaskCanvas(
     data[i + 3] = 255
   }
   ctx.putImageData(imageData, 0, 0)
+  smoothPatternEdges(ctx, size, size)
   return canvas
 }
 
@@ -398,7 +452,7 @@ export function getPatternDefinition(patternId: PatternId): PatternDefinition {
   return { id: patternId, ...CUSTOM_PATTERN_DEFINITION }
 }
 
-export function getPatternCanvas(patternId: PatternId, size = 128): HTMLCanvasElement {
+export function getPatternCanvas(patternId: PatternId, size = 512): HTMLCanvasElement {
   const custom = customCanvasRegistry.get(patternId)
   if (custom) return custom
 
@@ -416,10 +470,10 @@ export function getPatternCanvas(patternId: PatternId, size = 128): HTMLCanvasEl
   if (!ctx) throw new Error('Canvas 2D unavailable')
 
   if (isBuiltinPattern(patternId)) {
-    // Rasterize the vector drawer once at a fixed 128 base, then resample up to
-    // the requested size — matching how custom uploads are normalized to a 128
+    // Rasterize the vector drawer once at a fixed 512 base, then resample to
+    // the requested size — matching how custom uploads are normalized to a 512
     // height-mask canvas and scaled on draw.
-    const BASE_SIZE = 128
+    const BASE_SIZE = 512
     let baseWidth = BASE_SIZE
     let baseHeight = BASE_SIZE
     if (patternId === 'hex' || patternId === 'honeycomb') {
@@ -435,6 +489,7 @@ export function getPatternCanvas(patternId: PatternId, size = 128): HTMLCanvasEl
     PATTERN_DRAWERS[patternId](baseCtx, baseWidth, baseHeight)
 
     ctx.drawImage(baseCanvas, 0, 0, width, height)
+    smoothPatternEdges(ctx, width, height)
     return canvas
   }
 
