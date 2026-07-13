@@ -266,21 +266,36 @@ export function createPatternPreviewMaterial(input: PatternPreviewMaterialInput)
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
           {
-            float ppH = ppGetHeight();
-            if (ppSymmetric == 1) ppH -= 0.5;
-            float dhx = dFdx(ppH);
-            float dhy = dFdy(ppH);
-            vec3 ppN = normalize(normal);
-            vec3 vp = -vViewPosition;
-            vec3 dp1 = dFdx(vp);
-            vec3 dp2 = dFdy(vp);
-            vec3 ppT = dp1 - dot(dp1, ppN) * ppN;
-            vec3 ppB = dp2 - dot(dp2, ppN) * ppN;
-            ppT = length(ppT) > 1e-5 ? normalize(ppT) : vec3(1.0, 0.0, 0.0);
-            ppB = length(ppB) > 1e-5 ? normalize(ppB) : vec3(0.0, 1.0, 0.0);
-            float ppScale = max(length(dp1) + length(dp2), 1e-6);
-            float ppBump = (ppUseDisplacement == 1 ? ppAmplitude * 2.0 : ppAmplitude * 6.0) / ppScale;
-            normal = normalize(ppN - ppBump * (dhx * ppT + dhy * ppB));
+            vec3 vpos = -vViewPosition;              // displaced view-space position
+            vec3 dp1 = dFdx(vpos);
+            vec3 dp2 = dFdy(vpos);
+            if (ppUseDisplacement == 1) {
+              // The relief already lives in the geometry — derive the shading
+              // normal from the displaced surface itself. This is stable (no
+              // high-frequency texture-derivative aliasing / stippling) and
+              // reflects the true faceting the vertices produced.
+              vec3 geoN = cross(dp1, dp2);
+              if (length(geoN) > 1e-12) {
+                geoN = normalize(geoN);
+                if (dot(geoN, vpos) > 0.0) geoN = -geoN; // face the camera
+                normal = geoN;
+              }
+            } else {
+              // Bump-only mode: fake the relief by perturbing the flat normal
+              // from the height gradient.
+              float ppH = ppGetHeight();
+              if (ppSymmetric == 1) ppH -= 0.5;
+              float dhx = dFdx(ppH);
+              float dhy = dFdy(ppH);
+              vec3 ppN = normalize(normal);
+              vec3 ppT = dp1 - dot(dp1, ppN) * ppN;
+              vec3 ppB = dp2 - dot(dp2, ppN) * ppN;
+              ppT = length(ppT) > 1e-5 ? normalize(ppT) : vec3(1.0, 0.0, 0.0);
+              ppB = length(ppB) > 1e-5 ? normalize(ppB) : vec3(0.0, 1.0, 0.0);
+              float ppScale = max(length(dp1) + length(dp2), 1e-6);
+              float ppBump = ppAmplitude * 6.0 / ppScale;
+              normal = normalize(ppN - ppBump * (dhx * ppT + dhy * ppB));
+            }
           }`,
       )
   }
